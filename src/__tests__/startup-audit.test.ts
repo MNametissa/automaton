@@ -32,6 +32,8 @@ it('persists an honest audit before inference and advertises only executable pro
     expect(f.inference.calls).toHaveLength(1);
     const audit = JSON.parse(f.db.getKV('startup.audit')!);
     expect(audit.tools).toContain('self_audit');
+    expect(audit.tools).toContain('browser_action');
+    expect(audit.browser.browserVerified).toBe(false);
     expect(audit.tools).not.toContain('x402_fetch');
     expect(audit.tools).not.toContain('mcp:browser');
     const advertised = f.inference.calls[0].options?.tools?.map(t => t.function.name);

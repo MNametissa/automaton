@@ -1,3 +1,4 @@
+import { getBrowserReadiness } from '../integrations/browser.js';
 import { getAnalysisToolsReadiness } from '../integrations/analysis-tools.js';
 import { runtimeSkills, STARTUP_SKILLS } from '../skills/runtime.js';
 import fs from 'node:fs';
@@ -52,14 +53,16 @@ export async function auditStartup(context: ToolContext, tools: AutomatonTool[])
     timestamp: new Date().toISOString(), status: blockers.length ? 'blocked' : 'ready',
     mission, workspace, stateIntegrity: integrity, model: config.inferenceModel, modelAdvertised,
     modelInferenceTested: false, accountingMode: 'simulation', externalSpendLimitCents: 0,
+    interruptedOperatorMessages: db.raw.prepare("SELECT key, value FROM kv WHERE key LIKE 'operator.interrupted:%' ORDER BY updated_at DESC LIMIT 20").all(),
     allocationCents, goals, tasks, skills, previousTurns: db.getTurnCount(),
     tools: tools.map(t => t.name), blockers,
+    browser: await getBrowserReadiness({ workspace }),
     analysisTools: Object.fromEntries(Object.entries(analysisTools).map(([name, result]) => [name, { available: result.available, error: result.error, exitCode: result.exitCode }])),
     limitations: ['Tool inventory is registration, not a successful live test of every tool.',
       'Skill load receipts prove delivery of instructions, not model compliance.',
-      'No executable MCP transport or browser/desktop adapter is provided.',
+      'Browser readiness checks the CLI version only; live page interaction and model competence require separate tests. No executable MCP transport is provided.',
       'Acceptance checks establish their stated scope only; report semantics and missing criteria require additional evidence.'],
-    recovery: 'Retry transient failures within limits; choose another authorized approach; checkpoint blocked work and continue independent goals. Retry unavailable prerequisites on a later wake. Never fabricate access, funds, or successful results.',
+    recovery: 'Retry transient failures within limits; choose another authorized approach; checkpoint blocked work and continue independent goals. Retry unavailable prerequisites on a later wake. Reconcile interrupted operator requests against tool logs and confirmed effects before planning further work; never blindly replay an action with an unknown outcome. Never fabricate access, funds, or successful results.',
   };
   db.setKV('startup.audit', JSON.stringify(audit));
   return audit;

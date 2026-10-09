@@ -1,3 +1,6 @@
+import { createBrowserTools } from '../../integrations/browser.js';
+import { executeTool } from '../tools.js';
+import { SpendTracker } from '../spend-tracker.js';
 import { createAnalysisTools } from '../../integrations/analysis-tools.js';
 import { createRunpodStatusTool } from '../../integrations/runpod.js';
 import { sanitizeToolResult } from '../injection-defense.js';
@@ -98,7 +101,33 @@ export abstract class BaseHarness implements AgentHarness {
   async execute(): Promise<TaskResult> {
     this.context.budget.startedAt = Date.now();
 
-    const skillTools = [...harnessSkillTools(this.context.db, this.task.id), ...[...createAnalysisTools({ workspace: this.context.allowedEditRoot }), createRunpodStatusTool()].map(tool => ({
+    const browserCatalog = createBrowserTools({ sessionId: this.task.id, workspace: this.context.allowedEditRoot });
+    const browserAction = browserCatalog.find(tool => tool.name === 'browser_action');
+    const executeBrowserAction = browserAction?.execute;
+    let browserUsed = false;
+    if (browserAction && executeBrowserAction) {
+      browserAction.execute = async (args, context) => {
+        // This boundary is reached only after executeTool permits the action.
+        // Track attempts too: a failed/timed-out open may have started a daemon.
+        browserUsed = true;
+        const result = await executeBrowserAction(args, context);
+        if (args.action === 'close') {
+          try { if (JSON.parse(result).ok === true) browserUsed = false; } catch { /* Keep cleanup pending. */ }
+        }
+        return result;
+      };
+    }
+    const browserTools: HarnessTool[] = browserCatalog.map(tool => ({
+      name: tool.name, description: tool.description, parameters: tool.parameters,
+      execute: async args => {
+        if (!this.context.toolContext) return 'Error: browser tool context unavailable';
+        const result = await executeTool(tool.name, args, browserCatalog, this.context.toolContext,
+          this.context.policyEngine, { inputSource: this.context.inputSource, turnToolCallCount: 0,
+            sessionSpend: this.context.spendTracker ?? new SpendTracker(this.context.db) });
+        return result.error ? `Error: ${result.error}` : result.result;
+      },
+    }));
+    const skillTools = [...browserTools, ...harnessSkillTools(this.context.db, this.task.id), ...[...createAnalysisTools({ workspace: this.context.allowedEditRoot }), createRunpodStatusTool()].map(tool => ({
       name: tool.name, description: tool.description, parameters: tool.parameters,
       execute: async (args: Record<string, unknown>) => sanitizeToolResult(await tool.execute(args, this.context.toolContext!), 16000),
     }))];
@@ -116,156 +145,170 @@ export abstract class BaseHarness implements AgentHarness {
     let finalOutput = "";
     let finalSuccess = true;
 
-    while (true) {
-      this.checkBudget();
+    try {
+      while (true) {
+        this.checkBudget();
 
-      if (this.context.abortSignal.aborted) {
-        throw new Error("Harness execution aborted by abort signal");
-      }
-
-      let response: { content: string; toolCalls?: InferenceToolCall[] };
-      try {
-        response = await this.context.inference.chat({
-          tier: "fast",
-          messages: this.messages,
-          tools: toolDefs,
-          toolChoice: "auto",
-        });
-        consecutiveInferenceErrors = 0;
-      } catch (error) {
-        consecutiveInferenceErrors++;
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error(
-          `[${this.id}] Inference error (${consecutiveInferenceErrors}/${MAX_CONSECUTIVE_INFERENCE_ERRORS}): ${message}`,
-        );
-        if (consecutiveInferenceErrors >= MAX_CONSECUTIVE_INFERENCE_ERRORS) {
-          throw new Error(
-            `${MAX_CONSECUTIVE_INFERENCE_ERRORS} consecutive inference failures. Last error: ${message}`,
-          );
+        if (this.context.abortSignal.aborted) {
+          throw new Error("Harness execution aborted by abort signal");
         }
-        continue;
-      }
 
-      this.beforeTurn();
-      this.context.budget.turnsUsed++;
-      logger.info(
-        `[${this.id}] Turn ${this.context.budget.turnsUsed}/${this.context.budget.maxTurns} — task: ${this.task.title.slice(0, 60)}`,
-      );
-
-      if (response.toolCalls && response.toolCalls.length > 0) {
-        this.messages.push({
-          role: "assistant",
-          content: response.content || "",
-          tool_calls: response.toolCalls,
-        });
-
-        let taskDone: { summary: string; success: boolean } | null = null;
-
-        for (const toolCall of response.toolCalls) {
-          const loopResult = this.loopDetector.recordToolCall(
-            toolCall.function.name,
-            toolCall.function.arguments,
+        let response: { content: string; toolCalls?: InferenceToolCall[] };
+        try {
+          response = await this.context.inference.chat({
+            tier: "fast",
+            messages: this.messages,
+            tools: toolDefs,
+            toolChoice: "auto",
+          });
+          consecutiveInferenceErrors = 0;
+        } catch (error) {
+          consecutiveInferenceErrors++;
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error(
+            `[${this.id}] Inference error (${consecutiveInferenceErrors}/${MAX_CONSECUTIVE_INFERENCE_ERRORS}): ${message}`,
           );
-          if (loopResult.blocked) {
-            logger.warn(`[${this.id}] Loop detected: ${loopResult.reason}`);
-            this.messages.push({
-              role: "tool",
-              content:
-                `LOOP DETECTED: ${loopResult.reason}\n\n` +
-                "You MUST take a DIFFERENT action. If you cannot make progress, call task_done with a failure summary.",
-              tool_call_id: toolCall.id,
-            });
-            continue;
+          if (consecutiveInferenceErrors >= MAX_CONSECUTIVE_INFERENCE_ERRORS) {
+            throw new Error(
+              `${MAX_CONSECUTIVE_INFERENCE_ERRORS} consecutive inference failures. Last error: ${message}`,
+            );
           }
+          continue;
+        }
 
-          const tool = tools.find((entry) => entry.name === toolCall.function.name);
-          let output: string;
+        this.beforeTurn();
+        this.context.budget.turnsUsed++;
+        logger.info(
+          `[${this.id}] Turn ${this.context.budget.turnsUsed}/${this.context.budget.maxTurns} — task: ${this.task.title.slice(0, 60)}`,
+        );
 
-          if (!tool) {
-            output = `Error: Unknown tool '${toolCall.function.name}'. Available tools: ${tools.map((entry) => entry.name).join(", ")}`;
-            logger.warn(`[${this.id}] Unknown tool: ${toolCall.function.name}`);
-          } else {
-            try {
-              const args = typeof toolCall.function.arguments === "string"
-                ? JSON.parse(toolCall.function.arguments)
-                : toolCall.function.arguments;
-              output = await tool.execute(args as Record<string, unknown>);
-              if (output.length > MAX_TOOL_OUTPUT_LENGTH) {
-                output = output.slice(0, MAX_TOOL_OUTPUT_LENGTH) +
-                  `\n[TRUNCATED: ${output.length - MAX_TOOL_OUTPUT_LENGTH} chars omitted]`;
-              }
-              logger.info(`[${this.id}] ${tool.name} → ${output.slice(0, 120)}`);
+        if (response.toolCalls && response.toolCalls.length > 0) {
+          this.messages.push({
+            role: "assistant",
+            content: response.content || "",
+            tool_calls: response.toolCalls,
+          });
 
-              if (tool.name === "write_file" || tool.name === "patch_file") {
-                try {
+          let taskDone: { summary: string; success: boolean } | null = null;
+
+          for (const toolCall of response.toolCalls) {
+            const loopResult = this.loopDetector.recordToolCall(
+              toolCall.function.name,
+              toolCall.function.arguments,
+            );
+            if (loopResult.blocked) {
+              logger.warn(`[${this.id}] Loop detected: ${loopResult.reason}`);
+              this.messages.push({
+                role: "tool",
+                content:
+                  `LOOP DETECTED: ${loopResult.reason}\n\n` +
+                  "You MUST take a DIFFERENT action. If you cannot make progress, call task_done with a failure summary.",
+                tool_call_id: toolCall.id,
+              });
+              continue;
+            }
+
+            const tool = tools.find((entry) => entry.name === toolCall.function.name);
+            let output: string;
+
+            if (!tool) {
+              output = `Error: Unknown tool '${toolCall.function.name}'. Available tools: ${tools.map((entry) => entry.name).join(", ")}`;
+              logger.warn(`[${this.id}] Unknown tool: ${toolCall.function.name}`);
+            } else {
+              try {
+                const args = typeof toolCall.function.arguments === "string"
+                  ? JSON.parse(toolCall.function.arguments)
+                  : toolCall.function.arguments;
+                output = await tool.execute(args as Record<string, unknown>);
+                if (output.length > MAX_TOOL_OUTPUT_LENGTH) {
+                  output = output.slice(0, MAX_TOOL_OUTPUT_LENGTH) +
+                    `\n[TRUNCATED: ${output.length - MAX_TOOL_OUTPUT_LENGTH} chars omitted]`;
+                }
+                logger.info(`[${this.id}] ${tool.name} → ${output.slice(0, 120)}`);
+
+                if (tool.name === "write_file" || tool.name === "patch_file") {
+                  try {
+                    const parsedArgs = typeof toolCall.function.arguments === "string"
+                      ? JSON.parse(toolCall.function.arguments)
+                      : toolCall.function.arguments;
+                    if (typeof parsedArgs.path === "string") {
+                      this.artifacts.push(parsedArgs.path);
+                    }
+                  } catch {
+                    // ignore artifact tracking parse errors
+                  }
+                }
+
+                if (tool.name === "task_done" && /^TASK_COMPLETE:(SUCCESS|FAILURE):/.test(output)) {
                   const parsedArgs = typeof toolCall.function.arguments === "string"
                     ? JSON.parse(toolCall.function.arguments)
                     : toolCall.function.arguments;
-                  if (typeof parsedArgs.path === "string") {
-                    this.artifacts.push(parsedArgs.path);
-                  }
-                } catch {
-                  // ignore artifact tracking parse errors
+                  taskDone = {
+                    summary: typeof parsedArgs.summary === "string" ? parsedArgs.summary : output,
+                    success: output.startsWith('TASK_COMPLETE:SUCCESS:'),
+                  };
                 }
+              } catch (error) {
+                output = `Error executing ${toolCall.function.name}: ${error instanceof Error ? error.message : String(error)}`;
+                logger.error(`[${this.id}] Tool error: ${output}`);
               }
-
-              if (tool.name === "task_done" && /^TASK_COMPLETE:(SUCCESS|FAILURE):/.test(output)) {
-                const parsedArgs = typeof toolCall.function.arguments === "string"
-                  ? JSON.parse(toolCall.function.arguments)
-                  : toolCall.function.arguments;
-                taskDone = {
-                  summary: typeof parsedArgs.summary === "string" ? parsedArgs.summary : output,
-                  success: output.startsWith('TASK_COMPLETE:SUCCESS:'),
-                };
-              }
-            } catch (error) {
-              output = `Error executing ${toolCall.function.name}: ${error instanceof Error ? error.message : String(error)}`;
-              logger.error(`[${this.id}] Tool error: ${output}`);
             }
+
+            this.messages.push({
+              role: "tool",
+              content: output,
+              tool_call_id: toolCall.id,
+            });
           }
 
-          this.messages.push({
-            role: "tool",
-            content: output,
-            tool_call_id: toolCall.id,
-          });
-        }
-
-        const turnCheck = this.loopDetector.endTurn();
-        if (turnCheck.reason) {
-          if (turnCheck.blocked) {
-            throw new Error(`Unrecoverable loop detected: ${turnCheck.reason}`);
+          const turnCheck = this.loopDetector.endTurn();
+          if (turnCheck.reason) {
+            if (turnCheck.blocked) {
+              throw new Error(`Unrecoverable loop detected: ${turnCheck.reason}`);
+            }
+            this.messages.push({
+              role: "system",
+              content: turnCheck.reason,
+            });
           }
-          this.messages.push({
-            role: "system",
-            content: turnCheck.reason,
-          });
+
+          if (taskDone) {
+            finalOutput = taskDone.summary;
+            finalSuccess = taskDone.success;
+            break;
+          }
+
+          continue;
         }
 
-        if (taskDone) {
-          finalOutput = taskDone.summary;
-          finalSuccess = taskDone.success;
-          break;
-        }
-
-        continue;
+        finalOutput = response.content || "Task completed.";
+        finalSuccess = true;
+        logger.info(
+          `[${this.id}] Text-only response on turn ${this.context.budget.turnsUsed}: ${finalOutput.slice(0, 200)}`,
+        );
+        break;
       }
 
-      finalOutput = response.content || "Task completed.";
-      finalSuccess = true;
-      logger.info(
-        `[${this.id}] Text-only response on turn ${this.context.budget.turnsUsed}: ${finalOutput.slice(0, 200)}`,
-      );
-      break;
+      return {
+        success: finalSuccess,
+        output: finalOutput,
+        artifacts: [...new Set(this.artifacts)],
+        costCents: this.context.budget.costUsedCents,
+        duration: Date.now() - this.context.budget.startedAt,
+      };
+    } finally {
+      if (browserUsed && executeBrowserAction && this.context.toolContext) {
+        try {
+          // Teardown must still work after pause/abort; only close this task's
+          // session, keeping its persistent profile and captured artifacts.
+          const result = JSON.parse(await executeBrowserAction({ action: 'close' }, this.context.toolContext));
+          if (result.ok !== true) logger.warn(`[${this.id}] Browser teardown failed for task ${this.task.id}`);
+        } catch {
+          // A cleanup failure must not replace the task's result or exception.
+          logger.warn(`[${this.id}] Browser teardown failed for task ${this.task.id}`);
+        }
+      }
     }
-
-    return {
-      success: finalSuccess,
-      output: finalOutput,
-      artifacts: [...new Set(this.artifacts)],
-      costCents: this.context.budget.costUsedCents,
-      duration: Date.now() - this.context.budget.startedAt,
-    };
   }
 
   private checkBudget(): void {

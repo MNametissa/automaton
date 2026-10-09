@@ -1,0 +1,114 @@
+name: i-am-alive
+services:
+  runtime:
+    image: mnametissa-automaton:desktop
+    build:
+      context: ../..
+      dockerfile: conway-local/Dockerfile
+    command: ["node", "conway-local/desktop/entry.mjs"]
+    environment:
+      OPERATOR_BRIDGE_HOST: 0.0.0.0
+      OPERATOR_BRIDGE_PORT: "8788"
+      OPERATOR_BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
+      DESKTOP_PASSWORD_FILE: /run/secrets/desktop_password
+      DISPLAY: ":99"
+      AUTOMATON_BROWSER_HEADED: "true"
+      UPSTREAM_URL: http://127.0.0.1:8080
+      LOG_LEVEL: debug
+    secrets: [bridge_token, desktop_password]
+    ports:
+      - "127.0.0.1:6080:6080"
+    volumes:
+      - agent-state:/state
+      - agent-work:/workspace
+      - agent-control:/control
+    networks: [agent-link, browser-egress]
+    init: true
+    restart: unless-stopped
+    shm_size: 256mb
+    mem_limit: 1280m
+    cpus: 2
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+  librechat:
+    # Official production image includes both the API and compiled web client.
+    image: registry.librechat.ai/librechat-ai/librechat-api:v0.8.8@sha256:e031d2dbe70f8bcaa697f395f735ada9c6710fc8648bed373e06f7747ec36e71
+    env_file: ../../.standalone/desktop/.env
+    environment:
+      HOST: 0.0.0.0
+      NODE_ENV: production
+      PORT: "3080"
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      DOMAIN_CLIENT: http://127.0.0.1:3080
+      DOMAIN_SERVER: http://127.0.0.1:3080
+      ENDPOINTS: custom
+      SEARCH: "false"
+      ALLOW_REGISTRATION: "false"
+      ALLOW_EMAIL_LOGIN: "true"
+      ALLOW_PASSWORD_RESET: "false"
+      ALLOW_SOCIAL_LOGIN: "false"
+      CONFIG_PATH: /app/librechat.yaml
+      DEBUG_LOGGING: "false"
+      DEBUG_CONSOLE: "false"
+      NODE_OPTIONS: --max-old-space-size=768
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      - chat-uploads:/app/uploads
+      - chat-data:/app/data
+    ports:
+      - "127.0.0.1:3080:3080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      runtime:
+        condition: service_healthy
+    networks: [agent-link, chat-db, chat-access]
+    init: true
+    restart: unless-stopped
+    mem_limit: 1024m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3080/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+    cpus: 2
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+  mongodb:
+    image: mongo:8.0@sha256:d0d926f94df099bff534b7ee5b5986458131a22489dfff8664509af0c1e2ca9c
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.25", "--bind_ip_all"]
+    volumes: ["chat-db:/data/db"]
+    networks: [chat-db]
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+networks:
+  agent-link:
+    internal: true
+  chat-db:
+    internal: true
+  browser-egress:
+  chat-access:
+volumes:
+  agent-state:
+  agent-work:
+  agent-control:
+  chat-uploads:
+  chat-data:
+  chat-db:
+secrets:
+  bridge_token:
+    file: ../../.standalone/desktop/bridge-token
+  desktop_password:
+    file: ../../.standalone/desktop/desktop-password

@@ -176,5 +176,14 @@
     "source": "https://github.com/obra/the-elements-of-style",
     "license": "Public Domain",
     "sha256": "1448ea19147b339ce37ae70551b233bb329d6bdfa46f0bf627b43b6133372233"
+  },
+  {
+    "name": "playwright-cli",
+    "path": "playwright-cli/SKILL.md",
+    "version": "0.1.22",
+    "source": "https://www.npmjs.com/package/@playwright/cli/v/0.1.22",
+    "sha256": "9bba755285a4c9ad72a4a41b9c7baef6fb516d329c0b44ed0573715f4479b906",
+    "license": "Apache-2.0",
+    "attribution": "Microsoft; bundled skill and references copied from @playwright/cli 0.1.22"
   }
 ]

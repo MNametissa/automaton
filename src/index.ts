@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { quarantineInterruptedOperatorMessages } from './social/inbox-recovery.js';
 import { loadBundledSkills } from './skills/bundled.js';
 import { paymentContext } from './payments/context.js';
 /**
@@ -210,6 +211,9 @@ async function run(): Promise<void> {
   // Initialize database
   const dbPath = resolvePath(config.dbPath);
   const db = createDatabase(dbPath);
+
+  const interrupted = quarantineInterruptedOperatorMessages(db);
+  if (interrupted.length) logger.warn(`Interrupted operator requests require effect reconciliation: ${interrupted.join(", ")}`);
 
   // Persist createdAt: only set if not already stored (never overwrite)
   const existingCreatedAt = db.getIdentity("createdAt");

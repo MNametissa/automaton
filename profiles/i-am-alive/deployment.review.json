@@ -101,5 +101,34 @@
     "Model selected after a permitted benchmark",
     "GitHub service identity and promotion permissions",
     "Initial commercial channel and permitted customer-facing actions"
-  ]
+  ],
+  "localDesktop": {
+    "authorized": true,
+    "host": "local Linux development machine",
+    "composeFile": "conway-local/desktop/compose.yml",
+    "copilotKitRequired": false,
+    "runtimeDeployed": true,
+    "supervisorDeployed": true,
+    "browserDeployed": true,
+    "browserLiveTestPassed": true,
+    "browserProfileSurvivedRestart": true,
+    "operatorBridgeDeployed": true,
+    "operatorReceiptSurvivedRestart": true,
+    "libreChatDeployed": true,
+    "libreChatStatus": "Healthy; USER login, /status, queued receipt display and history after restart verified",
+    "desktopUrl": "http://127.0.0.1:6080/vnc.html",
+    "chatUrlWhenReady": "http://127.0.0.1:3080",
+    "secretsDirectory": ".standalone/desktop (gitignored, local only)",
+    "agentAutostart": false,
+    "inferenceConfigured": false,
+    "externalSpendCents": 0,
+    "runtimeImageId": "sha256:2703b00010ec1773b5c4c70ad03d63602e8396c121a3a47198a76bfbe2d77662",
+    "libreChatImage": "registry.librechat.ai/librechat-ai/librechat-api:v0.8.8@sha256:e031d2dbe70f8bcaa697f395f735ada9c6710fc8648bed373e06f7747ec36e71",
+    "libreChatVerifiedAmd64Manifest": "sha256:e031d2dbe70f8bcaa697f395f735ada9c6710fc8648bed373e06f7747ec36e71",
+    "runtimeRecoveredAfterSigkill": true,
+    "libreChatUiVerified": true,
+    "libreChatHistorySurvivedRestart": true,
+    "heartbeatProfileInstalled": true,
+    "heartbeatRunning": false
+  }
 }

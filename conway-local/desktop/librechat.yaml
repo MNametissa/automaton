@@ -1,0 +1,18 @@
+version: 1.3.17
+cache: true
+endpoints:
+  custom:
+    - name: "I AM Alive"
+      apiKey: "${ALIVE_BRIDGE_TOKEN}"
+      baseURL: "http://runtime:8788/v1"
+      models:
+        default: ["i-am-alive"]
+        fetch: false
+      titleConvo: false
+      summarize: false
+      modelDisplayLabel: "I AM Alive"
+      dropParams: ["max_tokens", "temperature", "top_p", "presence_penalty", "frequency_penalty"]
+fileConfig:
+  endpoints:
+    I AM Alive:
+      disabled: true

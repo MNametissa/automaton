@@ -1,11 +1,13 @@
-I AM Alive — dossier de préparation du 9 octobre 2026
+I AM Alive — configuration et déploiement local du 9 octobre 2026
 
 1. Ce qui est prêt pour ta relecture
 
 genesis.txt contient le mandat proposé complet : finalité économique, stratégie,
 exécution commerciale, finances, choix des outils, évolution GitHub, mémoire et
-journal de décisions. Tu peux le modifier directement. Ce texte n'est pas encore
-installé dans un état personnel ou utilisé par un agent lancé.
+journal de décisions. Tu peux le modifier directement. Son contenu initial est
+installé dans /state/automaton.json du conteneur dédié I AM Alive. L'inférence
+autonome reste arrêtée. Une modification du fichier source n'écrase pas le profil
+déjà initialisé : elle devra aussi être appliquée à cette configuration persistante.
 
 deployment.review.json rassemble les réglages proposés et leur état réel.
 C'est une spécification lisible par machine, pas un automaton.json exécutable.
@@ -178,8 +180,8 @@ Le fichier heartbeat.yml fourni propose check_work toutes les minutes : réveill
 pour planifier, exécuter des tâches prêtes, traiter les échecs ou vérifier la fin.
 Il évite les réveils sans allocation positive, pendant une exécution, sur audit
 bloqué, sans objectif actif ou en simple attente de dépendances. Les demandes sont
-dédupliquées et espacées d'au moins deux minutes. Ce fichier n'est pas encore copié
-dans un état actif. Il propose également report_metrics toutes les cinq minutes.
+dédupliquées et espacées d'au moins deux minutes. Ce fichier est maintenant copié dans l'état du bureau local, mais le heartbeat
+ne s'exécute pas tant que le processus agent reste arrêté. Il propose également report_metrics toutes les cinq minutes.
 
 Supervisor 4.3.0 est ajouté à l'image Docker pour relancer Node indépendamment du
 modèle. Préparation, après initialisation de l'état et du gateway au port 8787 :
@@ -210,7 +212,7 @@ arrêté, détruit ou indisponible nécessite un contrôleur extérieur et les d
 fournisseur adaptés. Aucun tel contrôleur n'est actif et aucun pod n'a été créé.
 Un processus vivant mais bloqué n'est pas détecté par autorestart seul.
 
-10. Validation actuelle
+10. Validation du lot précédent (avant le bureau local)
 
 Typecheck et compilation du runtime/CLI réussis. Suite complète : 77 fichiers,
 1 771 tests réussis et un test opt-in ignoré. Dix tests du nouvel adaptateur
@@ -244,3 +246,80 @@ https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing
 https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps
 https://supervisord.org/configuration.html
 https://supervisord.org/subprocess.html
+
+
+11. Bureau local sans CopilotKit — 9 octobre 2026
+
+Profil accepté : Automaton + Playwright CLI 0.1.22 + noVNC + LibreChat 0.8.8.
+Aucun compte, SDK ni service CopilotKit Intelligence n'est nécessaire.
+Les logiciels sont auto-hébergés ; cela ne rend pas une future inférence payante
+ou un futur hébergement GPU gratuit. Le plafond externe reste de zéro dollar.
+
+Depuis la racine du dépôt, préparation et démarrage reproductibles :
+  node conway-local/desktop/prepare.mjs
+  docker compose -f conway-local/desktop/compose.yml up -d --build
+  node conway-local/desktop/create-account.mjs
+
+prepare.mjs crée les secrets en 0600 dans .standalone/desktop (ignoré par Git),
+sans les afficher. Le script create-account provisionne un USER local ; inscriptions publiques,
+connexion sociale et réinitialisation par email sont désactivées. Le mot de passe
+sera conservé dans .standalone/desktop/login.json après provisionnement effectif.
+Celui du bureau est dans .standalone/desktop/desktop-password.
+
+Le runtime, MongoDB et le bureau sont démarrés sur la machine locale. Le bureau
+est accessible à http://127.0.0.1:6080/vnc.html ; sa connexion authentifiée a été
+vérifiée dans un vrai navigateur à 1440x900, 1024x420 et 390x844. Le bureau distant
+reste un écran de bureau redimensionné, pas une interface mobile adaptative.
+LibreChat est démarré et sain à http://127.0.0.1:3080. Connexion USER, /status,
+affichage d'un reçu de demande en attente et historique après redémarrage du chat
+vérifiés depuis un vrai navigateur. L'image officielle librechat-api 0.8.8 contient
+le serveur et le client web compilé ; son manifeste amd64 est épinglé dans Compose. Les deux ports sont liés à la boucle locale, pas à Internet.
+
+Volumes Docker nommés : i-am-alive_agent-state (/state : configuration, portefeuille
+propre non financé, base SQLite, profils navigateur), i-am-alive_agent-work
+(/workspace : livrables et captures), i-am-alive_agent-control (/control : gateway,
+reçus de réponse, journaux, socket Supervisor), i-am-alive_chat-db, chat-data et
+chat-uploads. Ne pas utiliser compose down -v pour un simple arrêt : cela supprimerait
+les données persistantes. Un redémarrage complet du conteneur a conservé le profil
+navigateur et le reçu du message de diagnostic, sans doublon.
+
+Les outils browser_status et browser_action sont exposés au principal et à tous
+les harnesses ; les actions des workers traversent executeTool et sa politique.
+Chaque tâche utilise son propre profil. Le nettoyage ferme son navigateur à la fin,
+même en cas d'erreur, sans effacer profil ni captures. Le profil main est distinct.
+Le skill Playwright et ses références portent le catalogue à 26 skills. Le modèle
+reçoit le DOM ; une capture PNG produite ne prouve pas une inspection visuelle par
+un modèle texte. noVNC permet à l'opérateur de voir le navigateur réel.
+
+Le pont du chat n'effectue aucune inférence : il dépose le message dans l'inbox et
+un événement de réveil dans une transaction. Sans réponse native corrélée après
+20 secondes, il affiche un accusé explicite. /status montre les objectifs, tâches,
+échecs et réponses confirmées ; un état SQLite ne prouve pas que l'agent est vivant.
+Une clé Idempotency-Key explicite déduplique les reprises. Sans clé, deux demandes
+identiques restent deux demandes distinctes ; il n'existe pas de garantie universelle
+exactly-once face à une coupure réseau. Au redémarrage du runtime, une demande opérateur
+interrompue est marquée failed avec résultat inconnu et trace persistante. L'agent
+doit rapprocher les effets des journaux avant de reprendre le travail.
+
+Supervisor relance les services techniques en cas de crash. Le processus agent et
+l'observateur Runpod restent STOPPED : aucun endpoint d'inférence ni secret Runpod
+n'est configuré. Le profil desktop réapplique agent autostart=false à chaque démarrage.
+Démarrer le bureau n'active donc pas automatiquement les missions. Il faudra configurer
+et tester le modèle puis fixer l'activation persistante avant exploitation autonome.
+L'audit réel confirme Playwright CLI, REA, Mimic et les 26 skills disponibles, avec
+allocation locale nulle et inférence non testée. Aucune vente ou recette revendiquée.
+
+Validation de cette étape : 78 fichiers Vitest, 1 790 tests réussis et deux tests
+opt-in ignorés ; test réel du navigateur exécuté séparément (10/10). Typecheck et
+build runtime/CLI réussis. Image Docker testée sans réseau : 29 tests réussis sans
+skip, puis sept scénarios de compatibilité. Sur le déploiement : DOM, formulaire,
+clic, capture PNG, fenêtre noVNC, fermeture/réouverture du profil et redémarrage du
+conteneur vérifiés. La connexion UI LibreChat et l'historique après redémarrage sont vérifiés aux
+trois tailles d'écran. Les services récupèrent aussi après SIGKILL du conteneur
+runtime. Les demandes de diagnostic conservées n'ont déclenché aucune inférence.
+
+Sources de cette intégration :
+https://github.com/microsoft/playwright-cli
+https://www.npmjs.com/package/@playwright/cli/v/0.1.22
+https://github.com/novnc/noVNC
+https://github.com/LibreChat-AI/LibreChat/tree/v0.8.8

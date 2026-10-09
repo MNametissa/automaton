@@ -1,3 +1,4 @@
+import { createBrowserTools } from '../integrations/browser.js';
 import { createAnalysisTools } from '../integrations/analysis-tools.js';
 import { createRunpodStatusTool } from '../integrations/runpod.js';
 import { createUseSkillTool } from '../skills/runtime.js';
@@ -59,7 +60,7 @@ function confinePathToSandbox(filePath: string, root = SANDBOX_HOME): string | {
 
 // Tools whose results come from external sources and need sanitization
 const EXTERNAL_SOURCE_TOOLS = new Set([
-  'runpod_status',
+  'runpod_status', 'browser_status', 'browser_action',
   'rea_analyze_javascript', 'rea_inspect_har', 'mimic_hosts', 'mimic_learn', 'mimic_build_prompt',
   'verify_task',
   "exec",
@@ -122,6 +123,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
   return [
     createUseSkillTool(),
     ...createAnalysisTools(),
+    ...createBrowserTools(),
     createRunpodStatusTool(),
     // ── VM/Sandbox Tools ──
     {

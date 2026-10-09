@@ -1,3 +1,4 @@
+import { quarantineInterruptedOperatorMessages } from '../social/inbox-recovery.js';
 /**
  * Inbox Processing Tests (Sub-phase 1.2)
  *
@@ -48,6 +49,20 @@ describe("Inbox Processing State Machine (Phase 1.2)", () => {
 
   afterEach(() => {
     try { db.close(); } catch { /* already closed */ }
+  });
+
+  it('records an interrupted operator request without blindly replaying its effects', () => {
+    insertTestMessage(db, 'op_interrupted');
+    claimInboxMessages(db.raw, 1);
+    insertTestMessage(db, 'op_waiting');
+    insertTestMessage(db, 'op_done'); markInboxProcessed(db.raw, ['op_done']);
+    db.close(); db = createDatabase(dbPath);
+    expect(quarantineInterruptedOperatorMessages(db)).toEqual(['op_interrupted']);
+    expect(quarantineInterruptedOperatorMessages(db)).toEqual([]);
+    expect(JSON.parse(db.getKV('operator.interrupted:op_interrupted')!)).toMatchObject({ outcome: 'unknown', reason: 'runtime_restart' });
+    expect(db.raw.prepare('SELECT status FROM inbox_messages WHERE id=?').get('op_interrupted')).toEqual({ status: 'failed' });
+    expect(claimInboxMessages(db.raw, 10).map(row => row.id)).toEqual(['op_waiting']);
+    expect(db.raw.prepare('SELECT status FROM inbox_messages WHERE id=?').get('op_done')).toEqual({ status: 'processed' });
   });
 
   // ─── Schema: inbox_messages has new columns ────────────────────

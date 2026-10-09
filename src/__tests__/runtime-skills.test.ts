@@ -9,7 +9,8 @@ it('installs the real versioned bundles without auto-injecting every workflow', 
   const db = createTestDb();
   try {
     loadBundledSkills(db);
-    expect(runtimeSkills(db.raw)).toHaveLength(25);
+    expect(runtimeSkills(db.raw)).toHaveLength(26);
+    expect(db.getSkillByName('playwright-cli')?.enabled).toBe(true);
     for (const name of STARTUP_SKILLS) expect(db.getSkillByName(name)?.autoActivate).toBe(false);
     const context = skillContext(db.raw, 'worker-1');
     expect(context).toContain('trailofbits:insecure-defaults');
