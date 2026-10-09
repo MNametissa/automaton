@@ -5,11 +5,13 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DatabaseSync } from 'node:sqlite';
+import { spawn } from 'node:child_process';
+import { stateOperation } from './operator-state.mjs';
+import { agentEnvironment } from './desktop/boundary.mjs';
 
 const MODEL = 'i-am-alive';
 const MAX_BODY = 64 * 1024;
@@ -74,50 +76,65 @@ function validateChat(body) {
   return { content: last.content, hash: digest(JSON.stringify(messages)) };
 }
 
-function openRuntime(stateDir, controlDbPath) {
-  let state, control;
-  try {
-    const config = JSON.parse(fs.readFileSync(path.join(stateDir, 'automaton.json'), 'utf8'));
-    if (typeof config.dbPath !== 'string' || !config.dbPath ||
-        !/^0x[\da-f]{40}$/i.test(config.walletAddress) || !/^0x[\da-f]{40}$/i.test(config.creatorAddress)) throw new Error();
-    const dbPath = config.dbPath.startsWith('~/') ? path.join(os.homedir(), config.dbPath.slice(2)) : path.resolve(stateDir, config.dbPath);
-    if (!fs.statSync(dbPath).isFile() || !fs.statSync(controlDbPath).isFile()) throw new Error();
-    state = new DatabaseSync(dbPath);
-    state.exec('PRAGMA busy_timeout=3000');
-    control = new DatabaseSync(controlDbPath, { readOnly: true });
-    control.exec('PRAGMA busy_timeout=3000');
-    // Refuse unmigrated or unrelated databases; the bridge does not bootstrap an agent.
-    state.prepare('SELECT id, status, raw_content, to_address, retry_count FROM inbox_messages LIMIT 0').all();
-    state.prepare('SELECT source, reason, payload FROM wake_events LIMIT 0').all();
-    control.prepare('SELECT id, from_addr, to_addr, content, created_at, reply_to FROM messages LIMIT 0').all();
-    return { state, control, agent: config.walletAddress.toLowerCase(), creator: config.creatorAddress.toLowerCase(), close() { state.close(); control.close(); } };
-  } catch {
-    state?.close(); control?.close();
-    throw unavailable();
+// Never open agent-owned SQLite files with the controller's privileges. The
+// wrapper clears supplementary groups and drops UID/GID before native SQLite.
+function callState(stateDir, binding, operation, parameters = {}) {
+  const request = { stateDir, binding, operation, parameters };
+  if (process.getuid?.() !== 0) {
+    try { return Promise.resolve(stateOperation(request)); }
+    catch (error) { return Promise.reject(error.status === 409 ? failure(409, error.message) : unavailable()); }
   }
+  if (!binding) return Promise.reject(unavailable());
+  const payload = JSON.stringify(request);
+  if (Buffer.byteLength(payload) > 128 * 1024) return Promise.reject(unavailable());
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./desktop/boundary.mjs', import.meta.url)),
+      'run', process.execPath, fileURLToPath(new URL('./operator-state.mjs', import.meta.url))],
+      { cwd: '/', detached: true, env: agentEnvironment({}, { state: stateDir }), stdio: ['pipe', 'pipe', 'ignore'] });
+    const chunks = []; let size = 0, settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      if (error) {
+        // Include the SQLite helper, which is a child of the privilege wrapper.
+        try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+        reject(error);
+      } else resolve(result);
+    };
+    const timer = setTimeout(() => finish(unavailable()), 6000);
+    child.on('error', () => finish(unavailable()));
+    child.stdin.on('error', () => finish(unavailable()));
+    child.stdout.on('data', chunk => {
+      size += chunk.length;
+      if (size > 256 * 1024) finish(unavailable()); else chunks.push(chunk);
+    });
+    child.on('close', code => {
+      try {
+        const output = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (output.error === 409) finish(failure(409, 'Idempotency key already belongs to a different conversation'));
+        else if (code !== 0 || !output.result) finish(unavailable());
+        else finish(null, output.result);
+      } catch { finish(unavailable()); }
+    });
+    child.stdin.end(payload);
+  });
 }
 
-function submit(runtime, content, requestHash, idempotencyKey) {
-  const { state, agent, creator } = runtime;
-  const key = idempotencyKey === undefined ? `request:${crypto.randomUUID()}` : `key:${idempotencyKey}`;
-  const id = `op_${digest(`${agent}:${creator}:${key}`)}`;
-  state.exec('BEGIN IMMEDIATE');
+async function openRuntime(stateDir, controlDbPath, binding) {
+  let control;
   try {
-    state.exec(`CREATE TABLE IF NOT EXISTS operator_bridge_receipts (
-      id TEXT PRIMARY KEY, request_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
-    const existing = state.prepare('SELECT request_hash FROM operator_bridge_receipts WHERE id=?').get(id);
-    if (existing && existing.request_hash !== requestHash) throw failure(409, 'Idempotency key already belongs to a different conversation');
-    if (!existing) {
-      const envelope = `[Operator receipt: ${id}; reply_to: ${id}; recipient: ${creator}]\n${content}`;
-      state.prepare(`INSERT INTO inbox_messages (id, from_address, to_address, content, raw_content, status)
-        VALUES (?,?,?,?,?,'received')`).run(id, creator, agent, envelope, content);
-      state.prepare('INSERT INTO wake_events(source, reason, payload) VALUES(?,?,?)')
-        .run('operator', 'Operator message received', JSON.stringify({ messageId: id }));
-      state.prepare('INSERT INTO operator_bridge_receipts(id,request_hash) VALUES(?,?)').run(id, requestHash);
-    }
-    state.exec('COMMIT');
-    return id;
-  } catch (error) { state.exec('ROLLBACK'); throw error; }
+    const identity = await callState(stateDir, binding, 'validate');
+    if (!fs.statSync(controlDbPath).isFile()) throw new Error();
+    control = new DatabaseSync(controlDbPath, { readOnly: true });
+    control.exec('PRAGMA busy_timeout=3000');
+    control.prepare('SELECT id, from_addr, to_addr, content, created_at, reply_to FROM messages LIMIT 0').all();
+    return { control, agent: identity.agent, creator: identity.creator,
+      async stateOperation(operation, parameters) {
+        const result = await callState(stateDir, binding, operation, parameters);
+        if (result.agent !== identity.agent || result.creator !== identity.creator) throw unavailable();
+        return result.value;
+      }, close() { control.close(); } };
+  } catch { control?.close(); throw unavailable(); }
 }
 
 function replies(runtime, id) {
@@ -126,18 +143,11 @@ function replies(runtime, id) {
     .all(id, runtime.agent, runtime.creator);
 }
 
-function status(runtime) {
-  const { state, control, agent, creator } = runtime;
-  const persisted = state.prepare("SELECT value FROM kv WHERE key='agent_state'").get()?.value;
-  const agentState = ['setup', 'waking', 'running', 'sleeping', 'low_compute', 'critical', 'dead'].includes(persisted) ? persisted : 'unknown';
+async function status(runtime) {
+  const { control, agent, creator } = runtime;
   return {
-    agentState, runtime: 'unverified', model: 'unverified',
+    ...await runtime.stateOperation('status'), runtime: 'unverified', model: 'unverified',
     note: 'Persisted state is not a liveness check. Model availability is unverified; queued work may wait until the runtime and model are started.',
-    pendingMessages: state.prepare("SELECT COUNT(*) n FROM inbox_messages WHERE status IN ('received','in_progress')").get().n,
-    failedMessages: state.prepare("SELECT id, received_at AS receivedAt FROM inbox_messages WHERE status='failed' ORDER BY received_at DESC LIMIT 20").all(),
-    pendingTasks: state.prepare("SELECT COUNT(*) n FROM task_graph WHERE status IN ('pending','assigned','running','blocked')").get().n,
-    goals: state.prepare('SELECT id, title, status FROM goals ORDER BY created_at DESC LIMIT 20').all(),
-    tasks: state.prepare('SELECT id, goal_id AS goalId, title, status FROM task_graph ORDER BY created_at DESC LIMIT 30').all(),
     messages: control.prepare(`SELECT id, content, reply_to AS replyTo, created_at AS createdAt FROM messages
       WHERE lower(from_addr)=? AND lower(to_addr)=? ORDER BY id DESC LIMIT 10`).all(agent, creator),
   };
@@ -157,10 +167,18 @@ function completion(res, content, receipt, streaming) {
   res.end('data: [DONE]\n\n');
 }
 
-export function createOperatorBridge({ stateDir, controlDbPath, token, replyWaitMs = 20_000, pollIntervalMs = 200 }) {
+export function createOperatorBridge({ stateDir, controlDbPath, token, bindingFile, replyWaitMs = 20_000, pollIntervalMs = 200 }) {
   if (typeof token !== 'string' || token.length < 32 || token.length > 4096 || /\s/.test(token)) throw new Error('Invalid bridge token');
   if (!Number.isFinite(replyWaitMs) || replyWaitMs < 0 || replyWaitMs > 25_000 || !Number.isFinite(pollIntervalMs) || pollIntervalMs < 1 || pollIntervalMs > 1000) throw new Error('Invalid reply polling limit');
   const expected = Buffer.from(digest(token), 'hex');
+  let binding;
+  if (bindingFile) {
+    const stat = fs.lstatSync(bindingFile);
+    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || stat.uid !== process.getuid() || stat.size > 4096) throw new Error('Invalid controller binding');
+    binding = JSON.parse(fs.readFileSync(bindingFile, 'utf8'));
+    if (!/^0x[\da-f]{40}$/.test(binding.agent) || !/^0x[\da-f]{40}$/.test(binding.creator) ||
+        binding.dbPath !== path.resolve(stateDir, 'state.db')) throw new Error('Invalid controller binding');
+  }
   const server = http.createServer(async (req, res) => {
     let runtime;
     try {
@@ -171,20 +189,20 @@ export function createOperatorBridge({ stateDir, controlDbPath, token, replyWait
         req.resume(); json(res, 401, { error: { message: 'Unauthorized', type: 'authentication_error' } }); return;
       }
       if (req.method === 'GET' && route === '/v1/models') {
-        runtime = openRuntime(stateDir, controlDbPath);
+        runtime = await openRuntime(stateDir, controlDbPath, binding);
         json(res, 200, { object: 'list', data: [{ id: MODEL, object: 'model', created: 0, owned_by: 'automaton' }] }); return;
       }
       if (req.method === 'GET' && route === '/v1/status') {
-        runtime = openRuntime(stateDir, controlDbPath); json(res, 200, status(runtime)); return;
+        runtime = await openRuntime(stateDir, controlDbPath, binding); json(res, 200, await status(runtime)); return;
       }
       if (req.method !== 'POST' || route !== '/v1/chat/completions') { req.resume(); json(res, 404, { error: { message: 'Not found' } }); return; }
       const body = await readBody(req);
       const input = validateChat(body);
       const idempotencyKey = req.headers['idempotency-key'];
       if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 256)) throw failure(400, 'Invalid Idempotency-Key');
-      runtime = openRuntime(stateDir, controlDbPath);
-      if (input.content.trim() === '/status') { completion(res, JSON.stringify(status(runtime), null, 2), null, body.stream); return; }
-      const id = submit(runtime, input.content, input.hash, idempotencyKey);
+      runtime = await openRuntime(stateDir, controlDbPath, binding);
+      if (input.content.trim() === '/status') { completion(res, JSON.stringify(await status(runtime), null, 2), null, body.stream); return; }
+      const id = await runtime.stateOperation('submit', { content: input.content, requestHash: input.hash, idempotencyKey });
       const deadline = Date.now() + replyWaitMs;
       let confirmed;
       do {
@@ -193,7 +211,7 @@ export function createOperatorBridge({ stateDir, controlDbPath, token, replyWait
         await delay(Math.min(pollIntervalMs, deadline - Date.now()));
       } while (true);
       if (res.destroyed) return;
-      const persisted = runtime.state.prepare('SELECT status FROM inbox_messages WHERE id=?').get(id)?.status;
+      const persisted = await runtime.stateOperation('receipt', { id });
       const requestStatus = persisted === 'received' ? 'queued' : persisted || 'unknown';
       const receipt = { id, status: confirmed.length ? 'replied' : requestStatus };
       const content = confirmed.length ? confirmed.map(message => message.content).join('\n\n') :
@@ -215,7 +233,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const token = readBridgeTokenFile(process.env.OPERATOR_BRIDGE_TOKEN_FILE);
     const port = Number(process.env.OPERATOR_BRIDGE_PORT || 8788);
     if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error();
-    const server = createOperatorBridge({ stateDir: process.env.AUTOMATON_DIR, controlDbPath: process.env.DB_PATH, token });
+    if (process.getuid() === 0 && !process.env.OPERATOR_BINDING_FILE) throw new Error('Privileged bridge requires controller binding');
+    const server = createOperatorBridge({ stateDir: process.env.AUTOMATON_DIR, controlDbPath: process.env.DB_PATH, token, bindingFile: process.env.OPERATOR_BINDING_FILE });
     server.on('error', () => { console.error('Operator bridge could not listen'); process.exitCode = 1; });
     server.listen(port, process.env.OPERATOR_BRIDGE_HOST || '127.0.0.1', () => console.log('Operator bridge listening; runtime and model liveness are not implied'));
     for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { server.close(); server.closeAllConnections(); });

@@ -74,13 +74,13 @@ it('rounds reservations up while recording exact fractional cents', () => {
 it('migrates an existing v11 database without losing state', () => {
   const { db, file } = open();
   db.prepare("INSERT INTO kv (key,value) VALUES ('keep','existing')").run();
-  db.exec('DROP TABLE payment_attempts; DELETE FROM schema_version WHERE version>=12');
+  db.exec('DROP INDEX idx_transactions_operation_ref; ALTER TABLE transactions DROP COLUMN operation_ref; DROP TABLE payment_attempts; DELETE FROM schema_version WHERE version>=12');
   db.close(); handles.splice(handles.indexOf(db), 1);
   const upgraded = createDatabase(file); handles.push(upgraded.raw);
   expect(upgraded.getKV('keep')).toBe('existing');
   const ledger = new PaymentLedger(upgraded.raw);
   expect(ledger.get(ledger.reserve(quote, limits))?.status).toBe('reserved');
-  expect(upgraded.raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 13 });
+  expect(upgraded.raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 14 });
 });
 
 it('restores paid content after restart without authorizing another identical purchase', () => {
@@ -101,11 +101,11 @@ it('migrates v12 pending attempts without losing reservations', () => {
   const { db, file, ledger } = open();
   const id = ledger.reserve(quote, limits);
   ledger.submitted(id, 'nonce'); ledger.uncertain(id);
-  db.exec('ALTER TABLE payment_attempts DROP COLUMN scan_start_block; ALTER TABLE payment_attempts DROP COLUMN scan_next_block; DELETE FROM schema_version WHERE version=13');
+  db.exec('DROP INDEX idx_transactions_operation_ref; ALTER TABLE transactions DROP COLUMN operation_ref; ALTER TABLE payment_attempts DROP COLUMN scan_start_block; ALTER TABLE payment_attempts DROP COLUMN scan_next_block; DELETE FROM schema_version WHERE version>=13');
   db.close(); handles.splice(handles.indexOf(db), 1);
   const restored = createDatabase(file); handles.push(restored.raw);
   expect(new PaymentLedger(restored.raw).get(id)).toMatchObject({ status: 'uncertain', reserved_cents: 37, scan_start_block: null, scan_next_block: null });
-  expect(restored.raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 13 });
+  expect(restored.raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 14 });
 });
 
 it('persists scan progress and rejects stale concurrent cursor updates after restart', () => {

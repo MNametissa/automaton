@@ -51,6 +51,27 @@ async function start(options = {}) {
 const chat = (payload, extra = {}) => fetch(`${origin}/v1/chat/completions`, { method: 'POST', headers: { ...headers, ...extra }, body: JSON.stringify(payload) });
 const outbound = (receipt, content, from = agent, to = creator) => control.prepare('INSERT INTO messages(from_addr,to_addr,content,created_at,reply_to) VALUES(?,?,?,?,?)').run(from, to, content, new Date().toISOString(), receipt);
 
+test('controller binding pins database and identities against agent configuration changes', async () => {
+  await new Promise(resolve => server.close(resolve));
+  const bindingFile = path.join(dir, 'binding.json');
+  fs.writeFileSync(bindingFile, JSON.stringify({ agent, creator, dbPath: path.join(dir, 'state.db') }), { mode: 0o600 });
+  await start({ bindingFile });
+  assert.equal((await chat(body('bound request'))).status, 200);
+  fs.writeFileSync(path.join(dir, 'automaton.json'), JSON.stringify({ dbPath: path.join(dir, 'control.db'), walletAddress: creator, creatorAddress: agent }));
+  assert.equal((await chat(body('tampered routing'))).status, 503);
+  assert.equal(state.prepare('SELECT COUNT(*) n FROM inbox_messages').get().n, 1);
+});
+
+test('bound bridge rejects a symlink substituted for the state database', async () => {
+  await new Promise(resolve => server.close(resolve));
+  const bindingFile = path.join(dir, 'binding.json');
+  fs.writeFileSync(bindingFile, JSON.stringify({ agent, creator, dbPath: path.join(dir, 'state.db') }), { mode: 0o600 });
+  await start({ bindingFile });
+  fs.renameSync(path.join(dir, 'state.db'), path.join(dir, 'saved.db'));
+  fs.symlinkSync(path.join(dir, 'saved.db'), path.join(dir, 'state.db'));
+  assert.equal((await chat(body('symlink request'))).status, 503);
+});
+
 test('auth protects models, status and writes; health is limited', async () => {
   for (const route of ['/v1/models', '/v1/status']) assert.equal((await fetch(origin + route)).status, 401);
   assert.equal((await fetch(origin + '/v1/chat/completions', { method: 'POST', body: '{}' })).status, 401);

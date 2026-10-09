@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import type BetterSqlite3 from "better-sqlite3";
 import fs from "fs";
 import path from "path";
+import { TRANSACTION_TYPES } from "../types.js";
 
 type DatabaseType = BetterSqlite3.Database;
 import type {
@@ -29,6 +30,7 @@ import type {
 } from "../types.js";
 import {
   SCHEMA_VERSION,
+  ACCOUNTING_REFERENCE_MIGRATION,
   CREATE_TABLES,
   MIGRATION_V2,
   MIGRATION_V3,
@@ -236,15 +238,31 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
   // ─── Transactions ────────────────────────────────────────────
 
   const insertTransaction = (txn: Transaction): void => {
+    if (!(TRANSACTION_TYPES as readonly string[]).includes(txn.type)) {
+      throw new Error(`Invalid transaction type: ${txn.type}`);
+    }
+    const informational = txn.type === "credit_check" || txn.type === "funding_request";
+    if ((!informational && txn.amountCents === undefined)
+      || (txn.amountCents !== undefined && (!Number.isFinite(txn.amountCents)
+        || txn.amountCents < 0 || txn.amountCents > Number.MAX_SAFE_INTEGER))) {
+      throw new Error("Invalid transaction amount: expected finite non-negative cents");
+    }
+    const needsReference = txn.type === "consumption" || txn.type === "x402_payment";
+    if ((needsReference || txn.operationRef !== undefined)
+      && (typeof txn.operationRef !== "string" || !txn.operationRef.length
+        || txn.operationRef.length > 512 || txn.operationRef.trim() !== txn.operationRef)) {
+      throw new Error("Invalid operation reference: stable non-empty event identity required");
+    }
     db.prepare(
-      `INSERT INTO transactions (id, type, amount_cents, balance_after_cents, description)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO transactions (id, type, amount_cents, balance_after_cents, description, operation_ref)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(
       txn.id,
       txn.type,
       txn.amountCents ?? null,
       txn.balanceAfterCents ?? null,
       txn.description,
+      txn.operationRef ?? null,
     );
   };
 
@@ -630,6 +648,7 @@ function applyMigrations(db: DatabaseType): void {
 
   migrations.push({ version: 12, apply: () => db.exec(PAYMENT_SCHEMA) });
   migrations.push({ version: 13, apply: () => db.exec(PAYMENT_RECOVERY_MIGRATION) });
+  migrations.push({ version: 14, apply: () => db.exec(ACCOUNTING_REFERENCE_MIGRATION) });
   for (const m of migrations) {
     if (currentVersion < m.version) {
       const migrate = db.transaction(() => {
@@ -1549,6 +1568,7 @@ function deserializeTransaction(row: any): Transaction {
     id: row.id,
     type: row.type,
     amountCents: row.amount_cents ?? undefined,
+    operationRef: row.operation_ref ?? undefined,
     balanceAfterCents: row.balance_after_cents ?? undefined,
     description: row.description,
     timestamp: row.created_at,

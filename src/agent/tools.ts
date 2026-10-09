@@ -1,6 +1,7 @@
 import { createBrowserTools } from '../integrations/browser.js';
 import { createAnalysisTools } from '../integrations/analysis-tools.js';
 import { createRunpodStatusTool } from '../integrations/runpod.js';
+import { createOperatorContactTools } from '../integrations/operator-contact.js';
 import { createUseSkillTool } from '../skills/runtime.js';
 import { paymentContext } from '../payments/context.js';
 import { CHECKS_DESCRIPTION } from '../verification/runner.js';
@@ -125,6 +126,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
     ...createAnalysisTools(),
     ...createBrowserTools(),
     createRunpodStatusTool(),
+    ...createOperatorContactTools(),
     // ── VM/Sandbox Tools ──
     {
       name: "exec",
@@ -1799,7 +1801,7 @@ Model: ${ctx.inference.getDefaultModel()}
         const { ulid } = await import("ulid");
         ctx.db.insertTransaction({
           id: ulid(),
-          type: "transfer_out",
+          type: "internal_transfer_out",
           amountCents: amount,
           balanceAfterCents:
             transfer.balanceAfterCents ?? Math.max(balance - amount, 0),
@@ -2075,7 +2077,7 @@ Model: ${ctx.inference.getDefaultModel()}
         try {
           const { modelRegistryGetAll } = await import("../state/database.js");
           const rows = modelRegistryGetAll(ctx.db.raw);
-          if (rows.length > 0) {
+          if (!ctx.config.standalone && rows.length > 0) {
             const lines = rows.map(
               (r: any) =>
                 `${r.modelId} (${r.provider}) — tier: ${r.tierMinimum} | cost: ${r.costPer1kInput}/${r.costPer1kOutput} per 1k (in/out, hundredths of cents) | ctx: ${r.contextWindow} | tools: ${r.supportsTools ? "yes" : "no"} | ${r.enabled ? "enabled" : "disabled"}`,
@@ -2088,7 +2090,9 @@ Model: ${ctx.inference.getDefaultModel()}
         const models = await ctx.conway.listModels();
         const lines = models.map(
           (m) =>
-            `${m.id} (${m.provider}) — $${m.pricing.inputPerMillion}/$${m.pricing.outputPerMillion} per 1M tokens (in/out)`,
+            m.pricingKnown === false
+              ? `${m.id} (${m.provider}) — cost unknown (${m.billingMode || "provider"}); numeric routing estimates do not establish free inference`
+              : `${m.id} (${m.provider}) — $${m.pricing.inputPerMillion}/$${m.pricing.outputPerMillion} per 1M tokens (in/out)${m.pricingSource ? `; source: ${m.pricingSource}` : ""}`,
         );
         return `Available models:\n${lines.join("\n")}`;
       },

@@ -760,7 +760,7 @@ ${orchestratorStatus}
 
   // Layer 8: Available Tools (JSON schema)
   if (config.standalone && db.getKV('startup.audit')) {
-    sections.push(`--- STARTUP AUDIT (measured prerequisites; not a proof of task success) ---\n${db.getKV('startup.audit')}\n--- END STARTUP AUDIT ---`);
+    sections.push(`--- STARTUP AUDIT (preflight observations plus your model decision journal; only a complete assessment permits mission dispatch; not proof of task success) ---\n${db.getKV('startup.audit')}\n--- END STARTUP AUDIT ---`);
   }
 
   const toolDescriptions = tools

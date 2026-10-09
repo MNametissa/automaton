@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { startupAssessmentResponses } from "../startup-audit-fixtures.js";
 import { HarnessRegistry } from "../../agent/harness-registry.js";
 import { runAgentLoop } from "../../agent/loop.js";
 import { LocalWorkerPool, getLocalWorkerPool, shutdownLocalWorkers } from "../../orchestration/local-worker.js";
@@ -10,6 +11,12 @@ import { getTaskById } from "../../state/database.js";
 import { createTestDb, createTestConfig, createTestIdentity, MockConwayClient, MockInferenceClient, noToolResponse } from "../mocks.js";
 
 const success: TaskResult = { success: true, output: "done", artifacts: [], costCents: 0, duration: 1 };
+
+// Unit fixtures must not query a real chain for their synthetic wallet.
+vi.mock("../../conway/x402.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../conway/x402.js")>(),
+  getUsdcBalance: vi.fn(async () => 0),
+}));
 
 describe("local worker lifecycle", () => {
   let db: ReturnType<typeof createTestDb>;
@@ -218,7 +225,7 @@ describe("local worker lifecycle", () => {
     task("across-wakes");
     // Remote spawning is unavailable; both loops must use the same local fallback pool.
     vi.spyOn(conway, "createSandbox").mockRejectedValue(new Error("local test: no sandbox"));
-    const inference = new MockInferenceClient([noToolResponse("Waiting for workers.")]);
+    const inference = new MockInferenceClient([...(standalone ? startupAssessmentResponses(config, ["goal"]) : []), noToolResponse("Waiting for workers.")]);
     await runAgentLoop({ db, identity, config, conway, inference });
     await vi.waitFor(() => expect(executions).toEqual(["across-wakes"]));
     const address = getTaskById(db.raw, "across-wakes")?.assignedTo;
@@ -227,6 +234,7 @@ describe("local worker lifecycle", () => {
     expect(getTaskById(db.raw, "across-wakes")?.assignedTo).toBe(address);
     expect(executions).toEqual(["across-wakes"]);
     if (standalone) {
+      expect(JSON.parse(db.getKV("startup.audit")!).assessment.status).toBe("complete");
       expect(conway.createSandbox).not.toHaveBeenCalled();
       expect(destinations).toEqual([]);
     }

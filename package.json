@@ -58,6 +58,7 @@
     "cron-parser": "^4.9.0",
     "gray-matter": "^4.0.3",
     "js-tiktoken": "^1.0.21",
+    "nodemailer": "10.0.16",
     "openai": "^6.24.0",
     "ora": "^8.0.0",
     "simple-git": "^3.24.0",

@@ -5,7 +5,20 @@
  * The database IS the automaton's memory.
  */
 
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
+
+export const ACCOUNTING_REFERENCE_MIGRATION = `
+  ALTER TABLE transactions ADD COLUMN operation_ref TEXT;
+  CREATE INDEX idx_transactions_operation_ref ON transactions(operation_ref);
+  -- Only canonical confirmed native payment records have provable identities.
+  UPDATE transactions SET operation_ref = id
+  WHERE EXISTS (
+    SELECT 1 FROM payment_attempts p
+    WHERE transactions.id = 'payment:' || p.id AND p.status = 'confirmed'
+      AND ((p.kind = 'topup_credits' AND transactions.type = 'credit_purchase')
+        OR (p.kind != 'topup_credits' AND transactions.type = 'x402_payment'))
+  );
+`;
 
 export const CREATE_TABLES = `
   -- Schema version tracking
@@ -62,7 +75,8 @@ export const CREATE_TABLES = `
   );
 
   -- Financial transaction log
-  -- Application-level validation: type must be one of 'transfer_out','transfer_in','credit_purchase','topup','x402_payment','inference'
+  -- New writes validate type against TRANSACTION_TYPES and non-negative finite amounts.
+  -- Legacy unknown types remain readable and explicitly unclassified in reports.
   CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,

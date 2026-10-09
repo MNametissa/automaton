@@ -248,18 +248,24 @@ export interface Transaction {
   type: TransactionType;
   amountCents?: number;
   balanceAfterCents?: number;
+  /** Stable identity of this economic event, shared by payment/consumption views.
+   * Required for new consumption and x402_payment records. Use payment:<attemptId>
+   * for native settled payments; prepaid usage needs its own consumption-event identity.
+   */
+  operationRef?: string;
   description: string;
   timestamp: string;
 }
 
-export type TransactionType =
-  | "credit_check"
-  | "credit_purchase"
-  | "inference"
-  | "tool_use"
-  | "transfer_in"
-  | "transfer_out"
-  | "funding_request";
+// Transfers describe movement, not its economic purpose. Historical inference
+// and tool_use rows have no settlement provenance and remain unverified costs.
+export const TRANSACTION_TYPES = [
+  "credit_check", "credit_purchase", "topup", "x402_payment",
+  "inference", "tool_use", "transfer_in", "transfer_out", "funding_request",
+  "capital_contribution", "customer_revenue", "internal_transfer_in",
+  "internal_transfer_out", "consumption",
+] as const;
+export type TransactionType = typeof TRANSACTION_TYPES[number];
 
 // ─── Self-Modification ───────────────────────────────────────────
 
@@ -403,6 +409,8 @@ export interface ConwayClient {
   deleteDnsRecord(domain: string, recordId: string): Promise<void>;
   // Model discovery
   listModels(): Promise<ModelInfo[]>;
+  /** Standalone gateway observation; provider funds and real expense may be unknown. */
+  getInferenceStatus?(): Promise<GatewayInferenceStatus>;
   /** Create a new client scoped to a specific sandbox ID. */
   createScopedClient(targetSandboxId: string): ConwayClient;
 }
@@ -480,9 +488,31 @@ export interface DnsRecord {
   distance?: number;
 }
 
+export interface GatewayInferenceStatus {
+  mode: 'local' | 'remote';
+  state: string;
+  ready: boolean;
+  model: string | null;
+  billing_mode: string;
+  provider_balance_microusd: number | null;
+  infrastructure_expense_microusd: number | null;
+  effective_external_spend_limit_microusd: number | null;
+  declared_prepaid_allowance_microusd?: number;
+  allowance_source?: string;
+  budget_enforcement?: string;
+  approval_expires_at?: string | null;
+  paused?: boolean;
+  limits?: { max_input_bytes: number; max_output_tokens: number; timeout_ms: number };
+}
+
 export interface ModelInfo {
   id: string;
   provider: string;
+  /** Unknown rates remain numeric routing estimates, never verified provider costs. */
+  pricingKnown?: boolean;
+  billingMode?: string;
+  pricingSource?: string;
+  available?: boolean;
   pricing: {
     inputPerMillion: number;
     outputPerMillion: number;

@@ -9,6 +9,7 @@ import { createSocialClient } from '../social/client.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { generatePrivateKey } from 'viem/accounts';
 import { executeTool, createBuiltinTools } from '../agent/tools.js';
+import { startupAssessmentResponses } from './startup-audit-fixtures.js';
 
 const dirs: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
@@ -123,10 +124,12 @@ it('runs an action, persists its evidence, then resumes using the configured loc
   vi.stubGlobal('fetch', async (url: unknown) => { destinations.push(String(url)); throw new Error('Network forbidden in this test'); });
   try {
     const inference = new MockInferenceClient([
+      ...startupAssessmentResponses(config),
       toolCallResponse([{ name: 'exec', arguments: { command: 'echo evidence' } }]),
       toolCallResponse([{ name: 'sleep', arguments: { duration_seconds: 1, reason: 'checkpoint' } }]),
     ]);
     await runAgentLoop({ identity: createTestIdentity(), config, db, conway, inference });
+    expect(JSON.parse(db.getKV('startup.audit')!).assessment.status).toBe('complete');
     expect(db.getRecentTurns(10).some(t => t.toolCalls.some(c => c.name === 'exec' && c.result.includes('exit_code')))).toBe(true);
     expect(inference.calls.every(call => call.options?.model === 'local')).toBe(true);
     const previousTurns = db.getTurnCount();

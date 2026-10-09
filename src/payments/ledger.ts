@@ -127,8 +127,8 @@ export class PaymentLedger {
         VALUES (?,?,?,?,?,'x402',?,?)`).run(`payment:${id}`, row.kind, actualCents, row.recipient, row.domain, now.slice(0, 13), now.slice(0, 10));
       this.db.prepare(`INSERT INTO onchain_transactions (id,tx_hash,chain,operation,status,metadata)
         VALUES (?,?,?,?,'confirmed',?) ON CONFLICT(tx_hash) DO NOTHING`).run(id, hash, row.network, row.kind, JSON.stringify({ paymentAttemptId: id }));
-      this.db.prepare(`INSERT INTO transactions (id,type,amount_cents,description) VALUES (?,?,?,?)`)
-        .run(`payment:${id}`, row.kind === 'topup_credits' ? 'credit_purchase' : 'x402_payment', actualCents, `Confirmed payment ${hash}; attempt ${id}`);
+      this.db.prepare(`INSERT INTO transactions (id,type,amount_cents,description,operation_ref) VALUES (?,?,?,?,?)`)
+        .run(`payment:${id}`, row.kind === 'topup_credits' ? 'credit_purchase' : 'x402_payment', actualCents, `Confirmed payment ${hash}; attempt ${id}`, `payment:${id}`);
       this.db.prepare("UPDATE payment_attempts SET status='confirmed', tx_hash=?, settled_at=? WHERE id=?").run(hash, now, id);
     }).immediate();
   }

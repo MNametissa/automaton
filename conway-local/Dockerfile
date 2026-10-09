@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends chromium xvfb x
 COPY conway-local/browser-tools/package*.json /opt/browser-tools/
 RUN cd /opt/browser-tools && npm ci --ignore-scripts --no-audit --no-fund
 COPY . .
-RUN pnpm build && mkdir -p /state /workspace /control && chown node:node /state /workspace /control
+RUN pnpm build && mkdir -p /state /workspace /control /run/operator-secrets && chown node:node /state /workspace && chmod 0700 /control /run/operator-secrets
 ENV AUTOMATON_DIR=/state
 ENV AUTOMATON_WORKSPACE=/workspace
 ENV AUTOMATON_ANALYSIS_RUNTIME=/opt/analysis-tools

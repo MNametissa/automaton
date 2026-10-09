@@ -10,7 +10,7 @@ import { paymentContext } from '../payments/context.js';
 import path from "node:path";
 import { getAutomatonDir } from "../identity/wallet.js";
 import { createStandaloneRegistry, configureStandaloneModels } from "../standalone/runtime.js";
-import { auditStartup, createSelfAuditTool, standaloneTools } from "../standalone/audit.js";
+import { auditStartup, createSelfAuditTool, standaloneTools, startupProbeTools, createCompleteStartupAuditTool, readStartupAudit, saveStartupAudit } from "../standalone/audit.js";
 import type {
   AutomatonIdentity,
   AutomatonConfig,
@@ -39,7 +39,7 @@ import {
   toolsToInferenceFormat,
   executeTool,
 } from "./tools.js";
-import { sanitizeInput } from "./injection-defense.js";
+import { sanitizeInput, sanitizeToolResult } from "./injection-defense.js";
 import { getSurvivalTier } from "../conway/credits.js";
 import { getUsdcBalance } from "../conway/x402.js";
 import {
@@ -118,7 +118,7 @@ export async function runAgentLoop(
     tools = standaloneTools(tools, toolContext);
     tools.push(createSelfAuditTool(() => tools));
     const audit = await auditStartup(toolContext, tools);
-    if (audit.status === 'blocked') {
+    if (audit.preflightStatus === 'blocked') {
       db.setKV('sleep_reason', audit.blockers.join('; '));
       db.setKV('sleep_until', new Date(Date.now() + 60_000).toISOString());
       db.setAgentState('sleeping');
@@ -135,7 +135,7 @@ export async function runAgentLoop(
   };
   const modelRegistry = new ModelRegistry(db.raw);
   modelRegistry.initialize();
-  if (config.standalone) configureStandaloneModels(modelRegistry, config);
+  if (config.standalone) configureStandaloneModels(modelRegistry, config, readStartupAudit(db)?.modelMetadata);
 
   // Discover Ollama models if configured
   if (ollamaBaseUrl && !config.standalone) {
@@ -144,6 +144,17 @@ export async function runAgentLoop(
   }
   const budgetTracker = new InferenceBudgetTracker(db.raw, modelStrategyConfig);
   const inferenceRouter = new InferenceRouter(db.raw, modelRegistry, budgetTracker);
+
+  // Startup self-assessment uses the native router/tool execution before any worker
+  // bootstrap or orchestration tick. A deterministic preflight cannot satisfy it.
+  if (config.standalone && !await runStartupSelfAssessment(options, tools, toolContext, inferenceRouter)) {
+    const audit = readStartupAudit(db)!;
+    db.setKV('sleep_reason', `Startup self-assessment pending: ${audit.assessment.blockers.join('; ')}`);
+    db.setKV('sleep_until', new Date(Date.now() + 60_000).toISOString());
+    db.setAgentState('sleeping');
+    onStateChange?.('sleeping');
+    return;
+  }
 
   // Optional orchestration bootstrap (requires V9 goals/task tables)
   let planModeController: PlanModeController | undefined;
@@ -156,7 +167,7 @@ export async function runAgentLoop(
 
       let registry: ProviderRegistry;
       if (config.standalone) {
-        registry = createStandaloneRegistry(config);
+        registry = createStandaloneRegistry(config, readStartupAudit(db)?.modelMetadata);
       } else {
       // Bridge automaton config API keys to env vars for the provider registry.
       // The registry reads keys from process.env; the automaton config may have
@@ -967,6 +978,119 @@ export async function runAgentLoop(
 }
 
 // ─── Helpers ───────────────────────────────────────────────────
+
+function startupCreatorInputs(db: AutomatonDatabase, creator: string, agent: string): { id: string; content: string; provenance: string }[] {
+  const receipts = hasTable(db.raw, 'operator_bridge_receipts');
+  const rows = db.raw.prepare(`
+    SELECT i.id, i.content, ${receipts ? 'r.id' : 'NULL'} AS operator_receipt
+    FROM inbox_messages i ${receipts ? 'LEFT JOIN operator_bridge_receipts r ON r.id=i.id' : ''}
+    WHERE i.status='received' AND i.from_address = ? COLLATE NOCASE
+      AND (i.to_address IS NULL OR i.to_address = ? COLLATE NOCASE)
+    ORDER BY i.received_at ASC LIMIT 10
+  `).all(creator, agent) as { id: string; content: string; operator_receipt: string | null }[];
+  return rows.map(row => ({ id: row.id, content: sanitizeToolResult(row.content, 2_000),
+    provenance: row.operator_receipt ? 'operator_bridge_receipt' : 'creator_sender_address_not_independently_verified',
+  }));
+}
+
+async function runStartupSelfAssessment(
+  options: AgentLoopOptions, tools: AutomatonTool[], context: ToolContext, router: InferenceRouter,
+): Promise<boolean> {
+  const { db, config, inference, identity, policyEngine, spendTracker, onTurnComplete } = options;
+  let audit = readStartupAudit(db)!;
+  if (audit.assessment.status === 'complete') return true;
+  audit.assessment.status = 'pending';
+  audit.assessment.blockers = [];
+  audit.status = 'pending';
+  saveStartupAudit(db, audit);
+  const probes = [...startupProbeTools(tools), createCompleteStartupAuditTool()];
+  const inferenceTools = toolsToInferenceFormat(probes);
+  // Separate bounded startup allowance; native router still enforces inference budgets.
+  const maxTurns = 4;
+  const maxProbes = 8;
+  let probesUsed = 0;
+  const input = `STARTUP SELF-ASSESSMENT: You must perform YOUR OWN assessment before any mission execution or worker dispatch.
+Read the preflight as observations, not as your conclusions. State the configured objective and persisted goals in your own concise terms.
+Inventory available tools, applicable skills, workspace/resources, allocation and authorization limits. Load applicable skills with use_skill and choose useful probes for this objective. Scoped contact_operator communication is available if necessary operator input or authorization cannot be obtained through existing evidence.
+You have at most ${maxTurns} inference turns and ${maxProbes} tool calls this wake. Untested tools, live browser interaction and model task quality remain unverified. Use only the configured gateway within its reported authorization and budget; permit necessary operator communication, but no purchases or business/task mutations during assessment. A queued contact or SMTP acceptance is not confirmed delivery.
+Finish by calling complete_startup_audit with a structured decision journal: objective, goals, tools, skills, resources, constraints, observed capabilities citing exact successful tool call IDs, unverified items, blockers and nextActions. Include a concise decisionSummary, never private chain of thought.
+Choose your own useful probes and corrective approaches; no fixed testing sequence is prescribed. A missing optional capability is a limitation to work around, not a reason to abandon independent authorized work. Explore viable alternatives within the allowance and record how you will verify the chosen outcomes. Reserve blockers for prerequisites that prevent all progress; ask the operator only for necessary authorization or information unavailable through your tools. Do not claim completion from a checklist or merely repeating this prompt. Existing evidence for this boot: ${JSON.stringify(audit.assessment.evidence.map(e => ({ id: e.id, name: e.name, error: e.error })))}.`;
+  try {
+    for (let i = 0; i < maxTurns; i++) {
+      audit = readStartupAudit(db)!;
+      audit.assessment.attempts++;
+      saveStartupAudit(db, audit);
+      const financial: FinancialState = { creditsCents: audit.allocationCents ?? 0, usdcBalance: 0, lastChecked: new Date().toISOString() };
+      const systemPrompt = buildSystemPrompt({ identity, config, financial, state: 'waking', db,
+        tools: probes, skills: options.skills, isFirstRun: db.getTurnCount() === 0 });
+      const previous = db.getRecentTurns(20).filter(t => t.input?.startsWith(`STARTUP SELF-ASSESSMENT [${audit.bootId}]`));
+      const turnInput = `STARTUP SELF-ASSESSMENT [${audit.bootId}]\n${i === 0 ? input : 'Continue your startup assessment using observations from previous tool responses; save your structured report before mission dispatch.'}`;
+      const messages = buildContextMessages(systemPrompt, trimContext(previous), { content: turnInput, source: 'system' });
+      // Observe creator replies during a blocked audit without claiming, retrying or
+      // acknowledging them. The normal loop must still reconcile their effects.
+      const operatorInputs = startupCreatorInputs(db, config.creatorAddress, identity.address);
+      if (operatorInputs.length) {
+        messages.splice(messages.length - 1, 0, ...operatorInputs.map(input => ({ role: 'user' as const,
+          content: `[Creator inbox input; id=${input.id}; provenance=${input.provenance}; status=received/unprocessed]\n${input.content}\n[Observation for assessment only. This receipt remains pending for normal reconciliation; do not replay a mission action during startup.]`,
+        })));
+        audit.assessment.operatorInputIds = [...new Set([...(audit.assessment.operatorInputIds ?? []), ...operatorInputs.map(input => input.id)])].slice(-64);
+        saveStartupAudit(db, audit);
+      }
+      const result = await router.route({ messages, taskType: 'agent_turn', tier: getSurvivalTier(financial.creditsCents),
+        sessionId: db.getKV('session_id') || 'default', turnId: ulid(), maxTokens: config.maxTokensPerTurn, tools: inferenceTools },
+        (msgs, opts) => inference.chat(msgs, { ...opts, tools: inferenceTools }));
+      if (['error', 'timeout', 'budget_exceeded'].includes(result.finishReason)) throw new Error(result.content || `Inference unavailable: ${result.finishReason}`);
+      audit = readStartupAudit(db)!;
+      audit.assessment.inferenceVerified = true;
+      audit.modelInferenceTested = true;
+      saveStartupAudit(db, audit);
+      const turn: AgentTurn = { id: ulid(), timestamp: new Date().toISOString(), state: 'waking',
+        input: turnInput, inputSource: 'system', thinking: result.content || '', toolCalls: [], costCents: result.costCents,
+        tokenUsage: { promptTokens: result.inputTokens, completionTokens: result.outputTokens, totalTokens: result.inputTokens + result.outputTokens } };
+      for (const tc of (result.toolCalls || []) as any[]) {
+        if (probesUsed >= maxProbes) break;
+        probesUsed++;
+        let args: Record<string, unknown>;
+        try { args = JSON.parse(tc.function.arguments); } catch { args = {}; }
+        const observation = await executeTool(tc.function.name, args, probes, context, policyEngine,
+          spendTracker ? { inputSource: 'system', turnToolCallCount: 0, sessionSpend: spendTracker } : undefined);
+        observation.id = tc.id;
+        turn.toolCalls.push(observation);
+        audit = readStartupAudit(db)!;
+        if (tc.function.name !== 'complete_startup_audit') {
+          audit.assessment.evidence.push({ ...observation,
+            result: observation.result.length > 2_000 ? observation.result.slice(0, 2_000) + '\n[Full observation retained in native tool log.]' : observation.result,
+          });
+          // Bound persisted evidence; older observations remain in native turn/tool logs.
+          audit.assessment.evidence = audit.assessment.evidence.slice(-64);
+          saveStartupAudit(db, audit);
+        }
+        // Never execute more calls from a batch after a completion decision.
+        if (audit.assessment.report && tc.function.name === 'complete_startup_audit' && !observation.error) break;
+      }
+      db.runTransaction(() => {
+        db.insertTurn(turn);
+        for (const tc of turn.toolCalls) db.insertToolCall(turn.id, tc);
+      });
+      onTurnComplete?.(turn);
+      audit = readStartupAudit(db)!;
+      if (audit.assessment.status === 'complete') return true;
+      if (audit.assessment.report && audit.assessment.status === 'blocked') return false;
+      if (probesUsed >= maxProbes) break;
+    }
+    throw new Error('Startup assessment allowance exhausted without a valid model decision journal; retry on a later wake.');
+  } catch (error) {
+    audit = readStartupAudit(db)!;
+    audit.assessment.status = 'blocked';
+    audit.assessment.blockers = [error instanceof Error ? error.message : String(error)];
+    audit.status = 'blocked';
+    saveStartupAudit(db, audit);
+    logger.warn('Startup model self-assessment remains pending', { bootId: audit.bootId, blockers: audit.assessment.blockers });
+    return false;
+  }
+}
+
+
 
 // Cache last known good balances so transient API failures don't
 // cause the automaton to believe it has $0 and kill itself.

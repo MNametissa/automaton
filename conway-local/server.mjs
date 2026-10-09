@@ -8,22 +8,15 @@ import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { verifyMessage, keccak256, toBytes } from "viem";
 import { SiweMessage } from "siwe";
+import { loadInference } from "./inference.mjs";
+import { createOperatorContact } from "./operator-contact.mjs";
 
 const env = process.env;
 const PORT = Number(env.PORT || 8787);
 const HOST = env.HOST || "127.0.0.1";
 const DB_PATH = env.DB_PATH || new URL("./conway-local.db", import.meta.url).pathname;
-const UPSTREAM = (env.UPSTREAM_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
-const UPSTREAM_KEY = env.UPSTREAM_KEY || "";
-const MODEL_ID = env.MODEL_ID || "local";
 const MAX_BODY = 1024 * 1024;
-const UPSTREAM_TIMEOUT = Number(env.UPSTREAM_TIMEOUT_MS || 60_000);
-if (!Number.isFinite(UPSTREAM_TIMEOUT) || UPSTREAM_TIMEOUT <= 0) throw new Error("Invalid UPSTREAM_TIMEOUT_MS");
-const upstreamUrl = new URL(UPSTREAM);
-if (!["127.0.0.1", "localhost", "[::1]"].includes(upstreamUrl.hostname)) {
-  throw new Error("External inference is disabled in the zero-spend profile; use a local endpoint");
-}
-if (!["http:", "https:"].includes(upstreamUrl.protocol) || upstreamUrl.username || upstreamUrl.password) throw new Error("Invalid UPSTREAM_URL");
+const initialInference = loadInference(env);
 if (!["127.0.0.1", "localhost", "::1"].includes(HOST) && (!env.ROOT_ADDRESS || !env.TLS_CERT)) {
   throw new Error("Non-loopback listening requires ROOT_ADDRESS and TLS_CERT/TLS_KEY");
 }
@@ -44,6 +37,8 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT, from_addr TEXT, to_addr TEXT, content TEXT,
     signed_at TEXT, created_at TEXT, reply_to TEXT, read INTEGER NOT NULL DEFAULT 0);
 `);
+
+let operatorContact;
 
 const getMeta = (k, d = null) => db.prepare("SELECT v FROM meta WHERE k=?").get(k)?.v ?? d;
 const setMeta = (k, v) => db.prepare("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(k, String(v));
@@ -167,7 +162,7 @@ const routes = {
   "GET /v1/credits/balance": async (_req, addr) => {
     const balance = balanceCents(addr);
     const burn = burnFor(addr);
-    return [200, { balance_cents: balance, burn_cents_per_hour: burn, runway_hours: burn ? balance / burn : null, accounting_mode: "simulation", provider_balance_cents: null, external_spend_limit_cents: 0, paused: getMeta("paused") === "1" }];
+    return [200, { balance_cents: balance, burn_cents_per_hour: burn, runway_hours: burn ? balance / burn : null, accounting_mode: "simulation", provider_balance_cents: null, external_spend_limit_cents: loadInference(env).status().effective_external_spend_limit_microusd === 0 ? 0 : null, paused: getMeta("paused") === "1" }];
   },
 
   "GET /v1/credits/pricing": async () => [200, { tiers: [] }],
@@ -196,7 +191,12 @@ const routes = {
     });
   },
 
-  "GET /v1/models": async () => [200, { data: [{ id: MODEL_ID, provider: "conway", pricing: { input_per_million: 0, output_per_million: 0 } }] }],
+  "GET /v1/models": async () => [200, { data: [loadInference(env).catalog()] }],
+
+  "GET /v1/inference/status": async () => [200, { ...loadInference(env).status(), paused: getMeta("paused") === "1" }],
+
+  "POST /v1/operator/contact": async (req, addr) => [200, await operatorContact.request(addr, await readJson(req))],
+  "GET /v1/operator/contact": async (_req, addr) => [200, operatorContact.status(addr)],
 
   // Mort réelle : sans crédit, plus d'inférence, quoi que l'agent modifie chez lui.
   "POST /v1/chat/completions": async (req, addr) => {
@@ -204,19 +204,7 @@ const routes = {
     if (getMeta("paused") === "1") return [503, { error: "inference paused by operator" }];
     const body = await readJson(req);
     if (body.stream || !Array.isArray(body.messages) || !body.messages.length) return [400, { error: "non-streaming messages required" }];
-    if (body.model && body.model !== MODEL_ID) return [400, { error: "unknown model" }];
-    try {
-      const resp = await fetch(`${UPSTREAM}/v1/chat/completions`, {
-        method: "POST", redirect: "error", signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
-        headers: { "Content-Type": "application/json", ...(UPSTREAM_KEY ? { Authorization: `Bearer ${UPSTREAM_KEY}` } : {}) },
-        body: JSON.stringify({ ...body, model: MODEL_ID }),
-      });
-      let result;
-      try { result = await resp.json(); } catch { return [502, { error: "upstream returned invalid JSON" }]; }
-      return [resp.status, result];
-    } catch (e) {
-      return [e.name === "TimeoutError" ? 504 : 502, { error: e.name === "TimeoutError" ? "upstream timeout" : "upstream unavailable" }];
-    }
+    return loadInference(env).complete(body);
   },
 
   "GET /v1/sandboxes": async () => [200, { sandboxes: [] }],
@@ -280,6 +268,9 @@ const PUBLIC = new Set(["POST /v1/auth/nonce", "POST /v1/auth/verify", "POST /v1
   "POST /v1/messages", "POST /v1/messages/poll", "GET /v1/messages/count", "GET /v1/models"]);
 
 export function createServer() {
+  // Recover contact attempts only when the long-running controller starts, not
+  // when a concurrent CLI status/fund command opens the same database.
+  operatorContact ??= createOperatorContact({ db, configPath: env.OPERATOR_CONTACT_CONFIG || "/control/operator-contact.json" });
   const tls = env.TLS_CERT ? { cert: fs.readFileSync(env.TLS_CERT), key: fs.readFileSync(env.TLS_KEY) } : null;
   const handle = async (req, res) => {
     const started = Date.now();
@@ -318,7 +309,7 @@ const commands = {
     const server = createServer();
     server.requestTimeout = 30_000;
     server.headersTimeout = 10_000;
-    server.listen(PORT, HOST, () => console.log(`conway-local sur ${env.TLS_CERT ? "https" : "http"}://${HOST}:${server.address().port} → ${UPSTREAM}`));
+    server.listen(PORT, HOST, () => console.log(`conway-local sur ${env.TLS_CERT ? "https" : "http"}://${HOST}:${server.address().port} (inference ${initialInference.status().mode}: ${initialInference.status().state})`));
     const timer = setInterval(tick, 60_000);
     const stop = () => {
       clearInterval(timer);
@@ -334,7 +325,8 @@ const commands = {
     if (!root) return console.log("Aucun automaton provisionné.");
     const a = account(root);
     const bal = balanceCents(root);
-    console.log("Comptabilité simulée : allocation locale, aucun fonds fournisseur vérifié ; dépenses externes autorisées : $0.");
+    console.log("Comptabilité simulée : allocation locale, aucun fonds fournisseur vérifié.");
+    console.log(`inférence  ${JSON.stringify(loadInference(env).status())}`);
     console.log(`racine     ${root}\nfinancé    ${usd(a.funded)}\ndépensé    ${usd(a.spent)}\nsolde      ${usd(bal)}`);
     const burn = burnFor(root);
     console.log(`coût       ${usd(burn)}/h (part racine ; total ${usd(rate())}/h) → autonomie ${burn ? (bal / burn).toFixed(1) + " h" : "non calculée (part 0)"}`);

@@ -25,6 +25,7 @@ import {
 } from "./heartbeat/config.js";
 import { consumeNextWakeEvent, insertWakeEvent } from "./state/database.js";
 import { runAgentLoop } from "./agent/loop.js";
+import { beginStartupAuditSession } from "./standalone/audit.js";
 import { shutdownLocalWorkers } from "./orchestration/local-worker.js";
 import { ModelRegistry } from "./inference/registry.js";
 import { loadSkills } from "./skills/loader.js";
@@ -211,6 +212,7 @@ async function run(): Promise<void> {
   // Initialize database
   const dbPath = resolvePath(config.dbPath);
   const db = createDatabase(dbPath);
+  if (config.standalone) beginStartupAuditSession(db);
 
   const interrupted = quarantineInterruptedOperatorMessages(db);
   if (interrupted.length) logger.warn(`Interrupted operator requests require effect reconciliation: ${interrupted.join(", ")}`);

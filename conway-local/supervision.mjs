@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { readActivation, readPrivateJson } from './desktop/boundary.mjs';
 
 function cleanPath(value) {
   if (typeof value !== 'string' || !value || /[\r\n\0%;]/.test(value)) throw new Error('Use an explicit path without control characters, percent or semicolon');
@@ -13,9 +14,16 @@ function cleanPath(value) {
 }
 const quoted = value => `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 
-export function prepareSupervision({ app = fileURLToPath(new URL('..', import.meta.url)), state, work, control, monitor = false }) {
+export function prepareSupervision({ app = fileURLToPath(new URL('..', import.meta.url)), state, work, control, monitor = false, isolated = false }) {
   app = cleanPath(app); state = cleanPath(state); work = cleanPath(work); control = cleanPath(control);
-  const config = JSON.parse(fs.readFileSync(path.join(state, 'automaton.json'), 'utf8'));
+  if (isolated) {
+    if (process.getuid?.() !== 0) throw new Error('Isolated supervision requires the root controller');
+    const boundary = fs.lstatSync(control);
+    if (!boundary.isDirectory() || boundary.uid !== 0 || (boundary.mode & 0o077) !== 0) throw new Error('Isolated supervision requires private root-owned control storage');
+    const application = fs.lstatSync(app);
+    if (!application.isDirectory() || application.uid !== 0 || (application.mode & 0o022) !== 0) throw new Error('Isolated supervision requires immutable root-owned application storage');
+  }
+  const config = readPrivateJson(path.join(state, 'automaton.json'));
   if (config.standalone !== true) throw new Error('This supervisor profile requires an initialized standalone configuration');
   const origin = new URL(config.conwayApiUrl);
   if (origin.origin !== 'http://127.0.0.1:8787' || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) {
@@ -49,7 +57,7 @@ export function prepareSupervision({ app = fileURLToPath(new URL('..', import.me
   ].map(([key, value]) => `${key}=${quoted(value)}`).join(',');
   const program = (name, script, args, priority, enabled = true) => `
 [program:${name}]
-command=${quoted(process.execPath)} ${quoted(path.join(app, script))} ${args}
+command=${isolated && name === 'agent' ? `${quoted(process.execPath)} ${quoted(path.join(app, 'conway-local/desktop/boundary.mjs'))} run ` : ''}${quoted(process.execPath)} ${quoted(path.join(app, script))} ${args}
 directory=${app}
 environment=${environment}
 priority=${priority}
@@ -73,7 +81,7 @@ chmod=0600
 
 [supervisord]
 nodaemon=true
-umask=0077
+${isolated ? 'user=root\n' : ''}umask=0077
 logfile=${path.join(control, 'supervisord.log')}
 logfile_maxbytes=5MB
 logfile_backups=2
@@ -86,7 +94,7 @@ supervisor.rpcinterface_factory=supervisor.rpcinterface:make_main_rpcinterface
 [supervisorctl]
 serverurl=unix://${path.join(control, 'supervisor.sock')}
 ${program('gateway', 'conway-local/server.mjs', 'serve', 10)}
-${program('agent', 'dist/index.js', '--run', 20)}
+${program('agent', 'dist/index.js', '--run', 20, isolated ? readActivation(control) : true)}
 ${program('runpod-observer', 'conway-local/runpod-status.mjs', '--watch', 30, monitor)}
 `;
   const destination = path.join(control, 'supervisord.conf');

@@ -1,5 +1,6 @@
 import { paymentContext } from '../payments/context.js';
 import { checkWork } from './work.js';
+import { recordedFinancialReport } from '../accounting/report.js';
 /**
  * Built-in Heartbeat Tasks
  *
@@ -522,28 +523,7 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
     }
 
     try {
-      const transactions = taskCtx.db.getRecentTransactions(5000);
-      let revenueCents = 0;
-      let expenseCents = 0;
-
-      for (const tx of transactions) {
-        const amount = Math.max(0, Math.floor(tx.amountCents ?? 0));
-        if (amount === 0) continue;
-
-        if (tx.type === "transfer_in" || tx.type === "credit_purchase") {
-          revenueCents += amount;
-          continue;
-        }
-
-        if (
-          tx.type === "inference"
-          || tx.type === "tool_use"
-          || tx.type === "transfer_out"
-          || tx.type === "funding_request"
-        ) {
-          expenseCents += amount;
-        }
-      }
+      const financials = recordedFinancialReport(taskCtx.db.raw);
 
       const childFunding = taskCtx.db.raw
         .prepare("SELECT COALESCE(SUM(funded_amount_cents), 0) AS total FROM children")
@@ -559,9 +539,7 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
 
       const report = {
         timestamp: new Date().toISOString(),
-        revenueCents,
-        expenseCents,
-        netCents: revenueCents - expenseCents,
+        ...financials,
         fundedToChildrenCents: childFunding.total,
         taskExecutionCostCents: taskCosts.total,
         activeAgents: taskCtx.db.getChildren().filter(

@@ -21,6 +21,7 @@ import type {
   DomainRegistration,
   DnsRecord,
   ModelInfo,
+  GatewayInferenceStatus,
 } from "../types.js";
 import { ResilientHttpClient } from "./http-client.js";
 import { ulid } from "ulid";
@@ -553,25 +554,70 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
         const raw = result.data || result.models || [];
         return raw
           .filter((m: any) => m.available !== false)
-          .map((m: any) => ({
-            id: m.id,
-            provider: m.provider || m.owned_by || "unknown",
-            pricing: {
-              inputPerMillion:
-                m.pricing?.input_per_million ??
-                m.pricing?.input_per_1m_tokens_usd ??
-                0,
-              outputPerMillion:
-                m.pricing?.output_per_million ??
-                m.pricing?.output_per_1m_tokens_usd ??
-                0,
-            },
-          }));
+          .map((m: any) => {
+            const input = m.pricing?.input_per_million ?? m.pricing?.input_per_1m_tokens_usd;
+            const output = m.pricing?.output_per_million ?? m.pricing?.output_per_1m_tokens_usd;
+            const known = typeof input === 'number' && Number.isFinite(input) && input >= 0
+              && typeof output === 'number' && Number.isFinite(output) && output >= 0;
+            return {
+              id: m.id,
+              provider: m.provider || m.owned_by || 'unknown',
+              available: m.available !== false,
+              pricingKnown: known,
+              billingMode: typeof m.billing_mode === 'string' ? m.billing_mode : undefined,
+              pricingSource: typeof m.pricing?.source === 'string' ? m.pricing.source : undefined,
+              pricing: { inputPerMillion: known ? input : 0, outputPerMillion: known ? output : 0 },
+            };
+          });
       } catch {
         continue;
       }
     }
     return [];
+  };
+
+  const getInferenceStatus = async (): Promise<GatewayInferenceStatus> => {
+    const gateway = new URL(apiUrl);
+    if (gateway.username || gateway.password || gateway.search || gateway.hash
+      || (gateway.protocol !== 'https:' && !(gateway.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(gateway.hostname)))) {
+      throw new Error('Secure inference status gateway URL required');
+    }
+    const resp = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/inference/status`, {
+      method: 'GET', headers: { Authorization: apiKey }, redirect: 'error', signal: AbortSignal.timeout(3000),
+    });
+    if (!resp.ok) throw new Error(`Inference status unavailable: ${resp.status}`);
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error('Invalid inference status response');
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > 16384) { await reader.cancel(); throw new Error('Inference status response too large'); }
+        chunks.push(chunk.value);
+      }
+    } finally { reader.releaseLock(); }
+    let status: any;
+    try { status = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { throw new Error('Invalid inference status JSON'); }
+    const nullableMoney = (value: unknown) => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
+    if (!status || !['local', 'remote'].includes(status.mode) || typeof status.state !== 'string'
+      || typeof status.ready !== 'boolean' || !(status.model === null || typeof status.model === 'string')
+      || typeof status.billing_mode !== 'string' || !nullableMoney(status.provider_balance_microusd)
+      || !nullableMoney(status.infrastructure_expense_microusd) || !nullableMoney(status.effective_external_spend_limit_microusd)) {
+      throw new Error('Invalid inference status metadata');
+    }
+    // Only known observation fields reach the audit; never echo arbitrary gateway credentials.
+    const allowed = ['mode', 'state', 'ready', 'model', 'billing_mode', 'provider_balance_microusd',
+      'infrastructure_expense_microusd', 'effective_external_spend_limit_microusd', 'declared_prepaid_allowance_microusd',
+      'allowance_source', 'budget_enforcement', 'approval_expires_at', 'paused'];
+    const result = Object.fromEntries(allowed.filter(key => key in status).map(key => [key, status[key]]));
+    if (status.limits && ['max_input_bytes', 'max_output_tokens', 'timeout_ms'].every(key => Number.isSafeInteger(status.limits[key]) && status.limits[key] > 0)) {
+      result.limits = { max_input_bytes: status.limits.max_input_bytes, max_output_tokens: status.limits.max_output_tokens, timeout_ms: status.limits.timeout_ms };
+    }
+    return result as unknown as GatewayInferenceStatus;
   };
 
   const createScopedClient = (targetSandboxId: string): ConwayClient => {
@@ -597,6 +643,7 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
     addDnsRecord,
     deleteDnsRecord,
     listModels,
+    getInferenceStatus,
     createScopedClient,
   };
 

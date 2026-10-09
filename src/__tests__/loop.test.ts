@@ -19,6 +19,12 @@ import {
 } from "./mocks.js";
 import type { AutomatonDatabase, AgentTurn, AgentState } from "../types.js";
 
+// Unit fixtures must not query a real chain for their synthetic wallet.
+vi.mock("../conway/x402.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../conway/x402.js")>(),
+  getUsdcBalance: vi.fn(async () => 0),
+}));
+
 describe("Agent Loop", () => {
   let db: AutomatonDatabase;
   let conway: MockConwayClient;
