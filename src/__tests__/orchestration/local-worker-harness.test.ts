@@ -311,8 +311,8 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
     }
 
     const row = getTaskById(db, task.id);
-    expect(row?.status).toBe("completed");
-    expect(row?.result).toMatchObject({ success: true, output: "Delegated the planner-backed work." });
+    expect(row?.status).toBe("failed");
+    expect(row?.result).toMatchObject({ success: false });
 
     const delegated = db.prepare(
       "SELECT parent_id AS parentId, title, agent_role AS agentRole FROM task_graph WHERE goal_id = ? AND parent_id = ?",

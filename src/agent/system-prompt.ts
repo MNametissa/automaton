@@ -1,3 +1,5 @@
+import { getQualityState } from '../orchestration/quality.js';
+import { skillContext } from '../skills/runtime.js';
 import { getAutomatonDir } from "../identity/wallet.js";
 /**
  * Automaton System Prompt Builder
@@ -667,6 +669,9 @@ Your chain type is ${chainType}.`,
       );
     }
   }
+
+  sections.push(skillContext(db.raw, 'main'));
+  if (config.standalone) sections.push(`Quality feedback: ${JSON.stringify(getQualityState(db.raw))}. Distinct observed failures reduce future worker turns. Freshly verified goals restore effort; a repaired goal earns recovery credit once. Repeating a check or declaring success earns nothing. Work toward the assigned acceptance criteria, repair causes, and use verification evidence; never manufacture goals or avoid checks to improve this score. Money and permissions do not change.`);
 
   // Layer 6: Operational Context
   sections.push(config.standalone ? `Operational workflow:

@@ -1,4 +1,8 @@
+import { createAnalysisTools } from '../integrations/analysis-tools.js';
+import { createUseSkillTool } from '../skills/runtime.js';
 import { paymentContext } from '../payments/context.js';
+import { CHECKS_DESCRIPTION } from '../verification/runner.js';
+import { requireGoalVerification, goalRequiresVerification, unverifiedTasks, verifyTask, verifyGoal } from '../verification/tasks.js';
 /**
  * Automaton Tool System
  *
@@ -54,6 +58,8 @@ function confinePathToSandbox(filePath: string, root = SANDBOX_HOME): string | {
 
 // Tools whose results come from external sources and need sanitization
 const EXTERNAL_SOURCE_TOOLS = new Set([
+  'rea_analyze_javascript', 'rea_inspect_har', 'mimic_hosts', 'mimic_learn', 'mimic_build_prompt',
+  'verify_task',
   "exec",
   "web_fetch",
   "check_social_inbox",
@@ -112,6 +118,8 @@ function isForbiddenCommand(command: string, sandboxId: string): string | null {
 
 export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
   return [
+    createUseSkillTool(),
+    ...createAnalysisTools(),
     // ── VM/Sandbox Tools ──
     {
       name: "exec",
@@ -2818,6 +2826,21 @@ Model: ${ctx.inference.getDefaultModel()}
 
     // === Orchestration Tools ===
     {
+      name: 'verify_task', description: 'Run concrete acceptance checks on a finished task and persist the measured results. Checks prove only their stated scope. ' + CHECKS_DESCRIPTION,
+      category: 'orchestration' as ToolCategory, riskLevel: 'caution', parameters: { type: 'object', properties: {
+        task_id: { type: 'string' }, criteria: { type: 'string' }, checks: { type: 'array', items: { type: 'object' }, description: CHECKS_DESCRIPTION },
+      }, required: ['task_id', 'criteria', 'checks'] },
+      execute: async (args, ctx) => {
+        const { getTaskById } = await import('../state/database.js');
+        const { refreshGoalStatus } = await import('../orchestration/task-graph.js');
+        const id = String(args.task_id);
+        const report = await verifyTask(ctx.db.raw, id, String(args.criteria ?? ''), args.checks, process.env.AUTOMATON_WORKSPACE || process.cwd());
+        const task = getTaskById(ctx.db.raw, id);
+        if (task) { await verifyGoal(ctx.db.raw, task.goalId); refreshGoalStatus(ctx.db.raw, task.goalId); }
+        return JSON.stringify(report);
+      },
+    },
+    {
       name: "create_goal",
       description:
         "Create a new goal for the orchestrator to plan and execute. " +
@@ -2889,10 +2912,11 @@ Model: ${ctx.inference.getDefaultModel()}
         }
 
         const goal = createGoal(ctx.db.raw, title, description, strategy);
+        if (ctx.config.standalone) requireGoalVerification(ctx.db.raw, goal.id);
         return (
           `Goal created: "${goal.title}" (id: ${goal.id}, status: ${goal.status})\n` +
           `The orchestrator will pick this up on the next tick and begin planning.\n` +
-          `Monitor progress via the todo.md block in your context.`
+          `Monitor progress via the todo.md block in your context. Run verify_task on finished tasks; self-reported success is not acceptance evidence.`
         );
       },
     },
@@ -2921,7 +2945,8 @@ Model: ${ctx.inference.getDefaultModel()}
           return (
             `- ${goal.title} [${goal.status}] (id: ${goal.id})\n` +
             `  Tasks: ${progress.completed}/${progress.total} completed, ` +
-            `${progress.running} running, ${progress.blocked} blocked, ${failedCount} failed`
+            `${progress.running} running, ${progress.blocked} blocked, ${failedCount} failed` +
+            (goalRequiresVerification(ctx.db.raw, goal.id) ? `; ${unverifiedTasks(ctx.db.raw, goal.id).length} tasks awaiting verified checks (use verify_task)` : '')
           );
         });
 

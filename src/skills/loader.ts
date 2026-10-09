@@ -156,7 +156,7 @@ function validateInstructionContent(instructions: string, skillName: string): st
  * Instructions are sanitized and wrapped with trust boundary markers.
  */
 export function getActiveSkillInstructions(skills: Skill[]): string {
-  const active = skills.filter((s) => s.enabled && s.autoActivate);
+  const active = skills.filter((s) => s.enabled && s.autoActivate && /^[a-zA-Z0-9][a-zA-Z0-9_:-]*$/.test(s.name));
   if (active.length === 0) return "";
 
   let totalLength = 0;

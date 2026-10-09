@@ -7,6 +7,9 @@
 - Au lancement : connaître la mission, les outils utilisables, les limites et le travail en cours ; s’auditer avant d’agir.
 - Décider, planifier, exécuter, vérifier, corriger et reprendre sans sollicitation humaine routinière.
 - Évaluer les trois missions : logiciel testé/corrigé, site servi et vérifié, rapport fondé sur des sources.
+- Skills demandés : Superpowers et Ponytail, complétés par audit et rédaction ; utilisables par le principal et les travailleurs.
+- Outils demandés : REA et Mimic, réellement exécutables dans le runtime.
+- Les erreurs doivent avoir une conséquence mesurée, compensée par les réussites et corrections vérifiées.
 - Budget externe autorisé : 0 $. Une allocation locale est une simulation ; elle ne constitue ni un paiement ni un solde fournisseur.
 - L’autonomie demeure dans les ressources et autorisations configurées. Un prérequis absent doit être enregistré ; l’agent poursuit les travaux indépendants ou attend une condition de reprise, sans inventer de résultat.
 
@@ -59,10 +62,16 @@ Pour un objectif complexe : objectif → classification → plan → revue → t
 | Reprise des achats | Résultat HTTP durable ; même opération et purchase_id rejoue le résultat confirmé ; nouvelle intention explicite pour racheter | Aucun nouvel ID ne débloque une opération encore incertaine ou sans livraison vérifiée. Les recharges automatiques sans ID n’achètent pas indéfiniment : après le premier achat, l’agent doit examiner son solde et demander une nouvelle recharge avec un nouvel ID |
 | Rapprochement | Heartbeat traite au plus deux tentatives par passage ; écritures comptables atomiques et uniques ; payment_status et reconcile_payment disponibles | Recherche automatique des hashes perdus pour les nouvelles tentatives ; anciens paiements sans repère de bloc à rapprocher avec un hash fourni. Aucun remboursement ni récupération automatique d’une livraison manquante |
 | Recherche après coupure | Migration V13 ; bloc finalisé enregistré avant signature ; recherche AuthorizationUsed par contrat/payeur/nonce, puis reçu intégral vérifié | Au plus 2 000 blocs finalisés par tentative et passage ; curseur durable, sans avancement sur erreur RPC. Une page vide ne libère jamais le budget. Le rattrapage peut demander plusieurs passages et attend la finalisation des blocs. Si le repère initial est inaccessible, aucune signature n’est émise |
+| Vérification mesurée | verify_result abandonne les mots-clés ; verify_task exécute des scripts Node avec stdin/exit/JSON attendus, des requêtes HTTP locales et des contrôles de citations | Contrôles limités en temps et volume, chemins réels confinés ; le processus hérite de l’isolation du runtime, ce n’est pas une sandbox supplémentaire. La couverture des critères dépend des contrôles choisis |
+| Clôture standalone | Objectifs conservés actifs jusqu’à preuve persistée pour chaque tâche ; preuve liée au résultat et aux entrées contrôlées, réexécution commune de tous les contrôles avant certificat final ; coordinateur refuse une clôture prématurée | Une tâche « completed » signifie encore fin d’exécution et débloque ses dépendances. L’acceptation finale de l’objectif est distincte. Comportement historique conservé pour les objectifs non soumis à cette règle hors standalone |
+| Skills réellement consultables | 25 workflows embarqués : Superpowers 6.4.2, Ponytail 2.0.0, insecure-defaults Trail of Bits épinglé, rédaction Strunk ; sources/licences conservées dans resources/skills | use_skill consulte instructions et références par pages, catalogue partagé principal/travailleurs, trois entrées chargées au démarrage ; traces SQLite prouvent la livraison, pas l'application correcte par le modèle |
+| Analyse REA/Mimic | REA 6.1.0 et Mimic commit 8cf998ac installés séparément ; cinq outils typés pour JS, HAR, hôtes, endpoints et prompt de client Python | Installateur reproductible, probes CLI et vrais essais synthétiques ; Node 22, Python/venv et procps dans l’image ; analyse offline seulement. Aucun provider natif, capture de trafic, proxy hôte ou générateur Claude payant activé. Les commandes CLI restent dans l'environnement dédié |
+| Retour sur la qualité | Score -10 à +10 ; erreur distincte -2 ; objectif entièrement revérifié +3 une seule fois, récupération +1 plafonnée à une pénalité réellement appliquée | À plafond 20 tours : neutre 16, négatif 12, <=-6 donne 8, positif 20. Impact sur prochains travailleurs standalone, jamais sur l'argent ou les permissions ; pas de récompense pour une déclaration du modèle. Déduplication des observations, pas entraînement des poids ; couverture des critères toujours nécessaire |
+| Rapports | Les citations sont comparées aux textes des sources identifiées ; citations inventées refusées | Même des citations exactes produisent un résultat inconclusif : soutien sémantique, exhaustivité et calculs ne sont pas garantis. Aucun benchmark avec vrai modèle ni validateur sémantique indépendant installé |
 
 ## Travail restant pour l’autonomie opérationnelle
 
-1. Remplacer les validations lexicales par des critères exécutables selon la mission : tests, HTTP, fichiers, vérification des sources. Ne jamais déduire la réussite de la seule déclaration d’un travailleur.
+1. Compléter la couverture des critères : contrats fixés avant délégation, validation avant déblocage de chaque dépendance, support des piles autres que Node et validation sémantique indépendante des rapports. Les contrôles exécutables remplacent désormais la validation lexicale du coordinateur ; la clôture des objectifs standalone exige ces preuves.
 2. Relier réellement les transports MCP et leurs vérifications de santé avant d’ajouter navigateur ou bureau.
 3. Tester les trois missions avec un vrai modèle local disponible, conserver traces, temps, tokens, erreurs et interventions. À 0 $, aucune instance GPU payante à créer.
 4. Préparer le déploiement persistant sur les machines autorisées : volumes séparés, supervision de processus, récupération après arrêt, contrôle réseau. Le smoke test isolé ne remplace pas ce travail.
@@ -77,6 +86,8 @@ Utiliser Node 22.19.0 (fichier .nvmrc), puis :
 pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm build
+node conway-local/install-analysis-tools.mjs
+AUTOMATON_ANALYSIS_SMOKE=1 pnpm exec vitest run src/__tests__/analysis-tools.test.ts --maxWorkers=2 --minWorkers=1
 pnpm test --maxWorkers=2 --minWorkers=1
 pnpm test:local
 docker build -f conway-local/Dockerfile -t mnametissa-automaton:standalone .

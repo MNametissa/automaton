@@ -1,0 +1,30 @@
+{
+  "name": "elements-of-style",
+  "version": "1.0.0",
+  "description": "Writing guidance based on William Strunk Jr.'s The Elements of Style (1918)",
+  "author": {
+    "name": "Jesse Vincent",
+    "url": "https://github.com/obra"
+  },
+  "license": "Public Domain",
+  "repository": "https://github.com/obra/elements-of-style",
+  "homepage": "https://github.com/obra/elements-of-style",
+  "type": "module",
+  "main": "./.opencode/plugins/elements-of-style.js",
+  "pi": {
+    "extensions": [
+      "./.pi/extensions/elements-of-style.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "keywords": [
+    "writing",
+    "style",
+    "grammar",
+    "composition",
+    "clarity",
+    "pi-package"
+  ]
+}

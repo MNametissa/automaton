@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import { ulid } from "ulid";
+import { requireGoalVerification, goalRequiresVerification, unverifiedTasks, verifyGoal } from '../verification/tasks.js';
 import type { AutomatonIdentity } from "../types.js";
 import { createLogger } from "../observability/logger.js";
 import {
@@ -106,6 +107,9 @@ export class Orchestrator {
   }) {}
 
   async tick(): Promise<OrchestratorTickResult> {
+    if (this.params.config.standalone) {
+      for (const goal of getActiveGoals(this.params.db)) requireGoalVerification(this.params.db, goal.id);
+    }
     const counters: TickCounters = {
       tasksAssigned: 0,
       tasksCompleted: 0,
@@ -649,6 +653,9 @@ export class Orchestrator {
     const progress = getGoalProgress(this.params.db, goal.id);
 
     if (progress.total > 0 && progress.completed === progress.total) {
+      if (goalRequiresVerification(this.params.db, goal.id) && !await verifyGoal(this.params.db, goal.id)) {
+        return { ...state, failedError: 'Execution finished; use verify_task to run acceptance checks before goal completion.' };
+      }
       updateGoalStatus(this.params.db, goal.id, "completed");
       return {
         ...state,
@@ -917,7 +924,13 @@ export class Orchestrator {
   }
 
   private persistTodo(): void {
-    const todoMd = generateTodoMd(this.params.db);
+    let todoMd = generateTodoMd(this.params.db);
+    for (const goal of getActiveGoals(this.params.db)) {
+      if (goalRequiresVerification(this.params.db, goal.id)) {
+        const ids = unverifiedTasks(this.params.db, goal.id);
+        if (ids.length) todoMd += `\nAcceptance checks required: ${ids.join(', ')}. Run verify_task on finished tasks before declaring this goal complete.\n`;
+      }
+    }
     this.params.db.prepare(
       "INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, datetime('now'))",
     ).run(ORCHESTRATOR_TODO_KEY, todoMd);

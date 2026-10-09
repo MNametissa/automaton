@@ -1,3 +1,4 @@
+import { loadBundledSkills } from '../skills/bundled.js';
 import { paymentContext } from '../payments/context.js';
 /**
  * The Agent Loop
@@ -113,6 +114,7 @@ export async function runAgentLoop(
   };
 
   if (config.standalone) {
+    loadBundledSkills(db);
     tools = standaloneTools(tools, toolContext);
     tools.push(createSelfAuditTool(() => tools));
     const audit = await auditStartup(toolContext, tools);

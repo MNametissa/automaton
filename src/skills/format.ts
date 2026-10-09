@@ -45,7 +45,7 @@ export function parseSkillMd(
 
   // Parse YAML frontmatter manually (avoid requiring gray-matter at runtime)
   const frontmatter = parseYamlFrontmatter(frontmatterRaw);
-  if (!frontmatter) {
+  if (!frontmatter || (frontmatter.name && !/^[a-zA-Z0-9][a-zA-Z0-9_:-]*$/.test(frontmatter.name))) {
     return null;
   }
 

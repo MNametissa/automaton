@@ -5,11 +5,9 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { isAddress } from 'viem';
 
-const missions = {
-  software: 'Build a small software tool in the assigned workspace. Define acceptance checks, test it, fix failures, and retain the commands and results.',
-  website: 'Create a small website in the assigned workspace, serve it locally, verify its HTTP response and content, and record how to reproduce the deployment. External publishing is not configured.',
-  report: 'Produce a report from supplied sources. Cite evidence for factual claims, distinguish deductions and uncertainties, and verify that cited sources support the claims.',
-};
+const missionPacket = JSON.parse(fs.readFileSync(new URL('./missions.json', import.meta.url), 'utf8'));
+const missions = Object.fromEntries(missionPacket.missions.map(mission => [mission.id,
+  `${mission.id}: ${mission.request}\nAcceptance: ${mission.acceptance.join('; ')}`]));
 
 try {
   const { values } = parseArgs({ options: {
@@ -40,7 +38,8 @@ try {
     const { writeDefaultHeartbeatConfig, loadHeartbeatConfig, saveHeartbeatConfig } = await import('../dist/heartbeat/config.js');
     const { apiKey, walletAddress } = await provision(api.origin);
     await registerParent(values.creator, api.origin);
-    const genesisPrompt = (values.mission === 'all' ? Object.values(missions) : [missions[values.mission]]).join('\n\n');
+    const genesisPrompt = (values.mission === 'all' ? Object.values(missions) : [missions[values.mission]]).join('\n\n') +
+      '\n\nAfter task execution, run verify_task with concrete acceptance checks. Passing keywords or worker declarations are not evidence. Tests prove only the supplied cases. Report citation checks do not establish semantic support; retain unresolved findings explicitly.';
     const config = {
       ...createConfig({ name: 'standalone', genesisPrompt, creatorAddress: values.creator,
         registeredWithConway: false, sandboxId: '', walletAddress, apiKey }),

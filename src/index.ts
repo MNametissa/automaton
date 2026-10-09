@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { loadBundledSkills } from './skills/bundled.js';
 import { paymentContext } from './payments/context.js';
 /**
  * Conway Automaton Runtime
@@ -325,6 +326,7 @@ async function run(): Promise<void> {
   const skillsDir = config.skillsDir || "~/.automaton/skills";
   let skills: Skill[] = [];
   try {
+    loadBundledSkills(db);
     skills = loadSkills(skillsDir, db);
     logger.info(`[${new Date().toISOString()}] Loaded ${skills.length} skills.`);
   } catch (err: any) {

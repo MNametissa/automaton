@@ -1,3 +1,5 @@
+import { loadBundledSkills } from '../../skills/bundled.js';
+import { createTestDb } from '../mocks.js';
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -38,7 +40,7 @@ class TestHarness extends BaseHarness {
           properties: { summary: { type: "string" }, success: { type: "boolean" } },
           required: ["summary"],
         },
-        execute: async (args) => `TASK_COMPLETE:${args.summary as string}`,
+        execute: async (args) => `TASK_COMPLETE:${args.success === false ? 'FAILURE' : 'SUCCESS'}:${args.summary as string}`,
       },
     ];
   }
@@ -135,6 +137,25 @@ describe("agent/BaseHarness integration", () => {
     (context.db as any).close?.();
   });
 
+  it('delivers startup skills and executes a skill invocation inside the worker loop', async () => {
+    const context = createContext(), state = createTestDb(); context.db.close(); context.db = state.raw;
+    loadBundledSkills(state);
+    let turns = 0;
+    context.inference = { chat: async params => {
+      expect(params.messages[0].content).toContain('ponytail:ponytail');
+      expect(params.tools?.map(tool => tool.function.name)).toContain('use_skill');
+      turns++;
+      if (turns === 1) return { content: '', toolCalls: [{ id: 'skill-call', type: 'function', function: { name: 'use_skill', arguments: JSON.stringify({ name: 'superpowers:verification-before-completion' }) } }] };
+      expect(params.messages.some(message => message.role === 'tool' && String(message.content).includes('Verification Before Completion'))).toBe(true);
+      return { content: '', toolCalls: [{ id: 'done-call', type: 'function', function: { name: 'task_done', arguments: JSON.stringify({ summary: 'Skill loaded', success: true }) } }] };
+    } };
+    try {
+      const harness = new TestHarness(); await harness.initialize(createTask(), context);
+      expect((await harness.execute()).success).toBe(true);
+      expect(state.raw.prepare("SELECT count(*) AS n FROM kv WHERE key LIKE 'skills.loaded:task-1:superpowers:verification-before-completion:%'").get()).toEqual({ n: 1 });
+    } finally { state.close(); }
+  });
+
   it("fails immediately when the turn budget is already exhausted", async () => {
     const harness = new TestHarness();
     const task = createTask();
@@ -143,6 +164,18 @@ describe("agent/BaseHarness integration", () => {
     await harness.initialize(task, context);
     await expect(harness.execute()).rejects.toThrow(/Budget exhausted: reached max turns/);
     (context.db as any).close?.();
+  });
+
+  it('does not accept a denied task_done merely because the model requested success', async () => {
+    class DeniedHarness extends TestHarness {
+      override getToolDefs(): HarnessTool[] {
+        return [{ name: 'task_done', description: 'guarded', parameters: {}, execute: async () => 'NOT COMPLETE: evidence missing' }];
+      }
+    }
+    const context = createContext(); context.budget.maxTurns = 1;
+    const harness = new DeniedHarness(); await harness.initialize(createTask(), context);
+    await expect(harness.execute()).rejects.toThrow(/Budget exhausted/);
+    context.db.close();
   });
 
   it("does not consume turn budget or reset per-turn state on inference retry", async () => {

@@ -1,3 +1,7 @@
+import { createAnalysisTools } from '../../integrations/analysis-tools.js';
+import { sanitizeToolResult } from '../injection-defense.js';
+import { getQualityState } from '../../orchestration/quality.js';
+import { skillContext, harnessSkillTools } from '../../skills/runtime.js';
 import { createLogger } from "../../observability/logger.js";
 import type { ChatMessage, InferenceToolCall } from "../../types.js";
 import type { TaskNode, TaskResult } from "../../orchestration/task-graph.js";
@@ -31,7 +35,7 @@ export abstract class BaseHarness implements AgentHarness {
       windowSize: 10,
     });
     this.messages = [
-      { role: "system", content: this.buildSystemPrompt() },
+      { role: "system", content: this.composeSystemPrompt() },
       { role: "user", content: this.buildTaskPrompt() },
     ];
     this.artifacts = [];
@@ -39,6 +43,11 @@ export abstract class BaseHarness implements AgentHarness {
 
   abstract getToolDefs(): HarnessTool[];
   abstract buildSystemPrompt(): string;
+
+  protected composeSystemPrompt(): string {
+    return this.buildSystemPrompt() + skillContext(this.context.db, this.task.id) + (this.context.config.standalone
+      ? `\nRuntime quality feedback: ${JSON.stringify(getQualityState(this.context.db))}. Your turn ceiling is ${this.context.budget.maxTurns}. Failures reduce future effort; verified completion and recovery restore it, within the configured maximum. Report errors honestly, repair causes and prove assigned outcomes; unverified claims earn nothing.` : '');
+  }
 
   protected beforeTurn(): void {}
 
@@ -90,7 +99,11 @@ export abstract class BaseHarness implements AgentHarness {
   async execute(): Promise<TaskResult> {
     this.context.budget.startedAt = Date.now();
 
-    const tools = this.getToolDefs();
+    const skillTools = [...harnessSkillTools(this.context.db, this.task.id), ...createAnalysisTools({ workspace: this.context.allowedEditRoot }).map(tool => ({
+      name: tool.name, description: tool.description, parameters: tool.parameters,
+      execute: async (args: Record<string, unknown>) => sanitizeToolResult(await tool.execute(args, this.context.toolContext!), 16000),
+    }))];
+    const tools = [...this.getToolDefs().filter(tool => !skillTools.some(s => s.name === tool.name)), ...skillTools];
     const toolDefs = tools.map((tool) => ({
       type: "function" as const,
       function: {
@@ -197,13 +210,13 @@ export abstract class BaseHarness implements AgentHarness {
                 }
               }
 
-              if (tool.name === "task_done") {
+              if (tool.name === "task_done" && /^TASK_COMPLETE:(SUCCESS|FAILURE):/.test(output)) {
                 const parsedArgs = typeof toolCall.function.arguments === "string"
                   ? JSON.parse(toolCall.function.arguments)
                   : toolCall.function.arguments;
                 taskDone = {
                   summary: typeof parsedArgs.summary === "string" ? parsedArgs.summary : output,
-                  success: parsedArgs.success !== false,
+                  success: output.startsWith('TASK_COMPLETE:SUCCESS:'),
                 };
               }
             } catch (error) {

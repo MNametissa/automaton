@@ -130,6 +130,17 @@ describe("agent/OrchestratorHarness", () => {
     };
   }
 
+  it('does not verify repeated acceptance words without executable evidence', async () => {
+    const harness = new OrchestratorHarness(), task = makeTask(); persistTask(task);
+    await harness.initialize(task, makeContext({ chat: async () => ({ content: '{}' }) }));
+    const child = { ...task, id: 'child-claims', parentId: task.id, status: 'completed' as const,
+      result: { success: true, output: 'must include tests and validation', artifacts: [], costCents: 0, duration: 1 } };
+    persistTask(child);
+    const result = await harness.getToolDefs().find(t => t.name === 'verify_result')!.execute({ task_id: child.id, criteria: 'must include tests and validation' });
+    expect(result).toContain('VERIFICATION FAILED');
+    expect(result).not.toContain('VERIFIED:');
+  });
+
   it("creates planner artifacts on initialize and enforces planner dependency ordering", async () => {
     const initialPlan: PlannerOutput = {
       analysis: "Two-step plan",

@@ -56,3 +56,18 @@ it.each(['mission', 'model', 'workspace', 'allocation'])('waits without inferenc
     expect(f.db.getAgentState()).toBe('sleeping');
   } finally { f.db.close(); }
 });
+
+it('delivers requested skill content through the main agent tool loop', async () => {
+  const f = fixture();
+  f.inference = new MockInferenceClient([toolCallResponse([
+    { name: 'use_skill', arguments: { name: 'trailofbits:insecure-defaults' } },
+    { name: 'sleep', arguments: { duration_seconds: 1 } },
+  ])]);
+  try {
+    await runAgentLoop(f);
+    expect(f.db.getKV('skills.loaded:main:trailofbits:insecure-defaults:SKILL.md:0')).toBeDefined();
+    const messages = JSON.stringify(f.inference.calls[0].messages);
+    expect(messages).toContain('ponytail:ponytail');
+    expect(messages).toContain('writing:writing-clearly-and-concisely');
+  } finally { f.db.close(); }
+});

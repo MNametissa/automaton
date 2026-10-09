@@ -1,0 +1,7 @@
+{
+  "name": "automaton-local-analysis-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned, independently installed offline analysis CLIs",
+  "dependencies": { "rea-agents": "6.1.0" }
+}

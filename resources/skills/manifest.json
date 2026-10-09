@@ -1,0 +1,180 @@
+[
+  {
+    "name": "superpowers:brainstorming",
+    "path": "superpowers/brainstorming/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "a32d2255354775aa124855aa7100cf276bea096fff4ebb3a0edf57be216e6c72"
+  },
+  {
+    "name": "superpowers:diagnosing-superpowers",
+    "path": "superpowers/diagnosing-superpowers/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "5a652f8132cc901eb5ca61f89157839f87a2f20aed037fc7a2b51051bc37cd19"
+  },
+  {
+    "name": "superpowers:dispatching-parallel-agents",
+    "path": "superpowers/dispatching-parallel-agents/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "1968923066f3b707eb01d1992cdf4c42284c3855f70253b9cd5000ff45fca13c"
+  },
+  {
+    "name": "superpowers:executing-plans",
+    "path": "superpowers/executing-plans/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "f38e8f2ddcf079f65493adc713c1fed78421dfaf5f4dbf6b3a6b2b1d95466e71"
+  },
+  {
+    "name": "superpowers:finishing-a-development-branch",
+    "path": "superpowers/finishing-a-development-branch/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "8db5a922b242dd4e1bf824cb91c13b3e8d8e8a86d6ceaf7f0774eb9cce909d65"
+  },
+  {
+    "name": "superpowers:receiving-code-review",
+    "path": "superpowers/receiving-code-review/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "091df1629510af1b92fc4abd6f96732ebedb4cb2c0f3457e8f2740b0504a2438"
+  },
+  {
+    "name": "superpowers:requesting-code-review",
+    "path": "superpowers/requesting-code-review/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "cfcee1b06774e7c0517f1e09be1a11f2d5680257072723e709ddbcf7e08b795a"
+  },
+  {
+    "name": "superpowers:subagent-driven-development",
+    "path": "superpowers/subagent-driven-development/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "8dde5589ee083fb4999106d116f01c8fdaf3116a8a9813fdedeb80329de49046"
+  },
+  {
+    "name": "superpowers:systematic-debugging",
+    "path": "superpowers/systematic-debugging/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "808fc5717aa88ad65efff312b11c186294d3e6ee301afb584e2f86599b137787"
+  },
+  {
+    "name": "superpowers:test-driven-development",
+    "path": "superpowers/test-driven-development/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "64b03fce4aee5a97a93160cea8111f3ba13a17b7c001db4bd5836d67fd10705d"
+  },
+  {
+    "name": "superpowers:using-git-worktrees",
+    "path": "superpowers/using-git-worktrees/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "8cfb86f121269e8f7f12361e6795c4f6738828340e28964c9229d365666c9edd"
+  },
+  {
+    "name": "superpowers:using-superpowers",
+    "path": "superpowers/using-superpowers/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "82c5c8866ad7f5dd4440ce66bd7806ba48a2f13771beae5cf112e53f08fe36ba"
+  },
+  {
+    "name": "superpowers:verification-before-completion",
+    "path": "superpowers/verification-before-completion/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "2befe7fc55bcadaa3d97dd9e8efeb633d2561c0ebe74c5a8b17c4d9e7e4520b3"
+  },
+  {
+    "name": "superpowers:writing-plans",
+    "path": "superpowers/writing-plans/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "a6c67c1900064347c2a329990dd3c555657c51c3ec53b259a08aa01a2c26139a"
+  },
+  {
+    "name": "superpowers:writing-skills",
+    "path": "superpowers/writing-skills/SKILL.md",
+    "version": "6.4.2",
+    "source": "installed-plugin:superpowers",
+    "sha256": "bbdfe742f853562e643a3d40d64476359d47881e39cef80a189283fa26d11ab9"
+  },
+  {
+    "name": "ponytail:code-simplification",
+    "path": "ponytail/code-simplification/SKILL.md",
+    "version": "2.0.0",
+    "source": "installed-plugin:ponytail",
+    "sha256": "bd78ae65195fee4a03ae407d31ace2d8f1cf44e83b40e3df4fb0429c8cb0c7b4"
+  },
+  {
+    "name": "ponytail:entry-ponytail",
+    "path": "ponytail/entry-ponytail/SKILL.md",
+    "version": "2.0.0",
+    "source": "installed-plugin:ponytail",
+    "sha256": "fee9e0ce8e9bc0eb93af29b452acc0ff86373c2934a875e208956a6d2f095aeb"
+  },
+  {
+    "name": "ponytail:ponytail",
+    "path": "ponytail/ponytail/SKILL.md",
+    "version": "2.0.0",
+    "source": "installed-plugin:ponytail",
+    "sha256": "3d413849a55a3bdd8b01c860b5ae4a2f2b0cacfe1bfc0c97439ecc05e92219d7"
+  },
+  {
+    "name": "ponytail:ponytail-audit",
+    "path": "ponytail/ponytail-audit/SKILL.md",
+    "version": "2.0.0",
+    "source": "installed-plugin:ponytail",
+    "sha256": "1e7348762f289ddae0fd785dccb66212ae127debdd3c0c6dc39691866ff5fe1d"
+  },
+  {
+    "name": "ponytail:ponytail-debt",
+    "path": "ponytail/ponytail-debt/SKILL.md",
+    "version": "2.0.0",
+    "source": "installed-plugin:ponytail",
+    "sha256": "616e72782c3b7968888430fd8314899c175ea79ec16073d638fa582b4d6140b2"
+  },
+  {
+    "name": "ponytail:ponytail-gain",
+    "path": "ponytail/ponytail-gain/SKILL.md",
+    "version": "2.0.0",
+    "source": "installed-plugin:ponytail",
+    "sha256": "eecde3e21a9ce7c94300a288cce1a5e5251f4913c0abefdd99ee279b96a313d8"
+  },
+  {
+    "name": "ponytail:ponytail-help",
+    "path": "ponytail/ponytail-help/SKILL.md",
+    "version": "2.0.0",
+    "source": "installed-plugin:ponytail",
+    "sha256": "ed807f06935af6637896d2a91d9184bd0445d773bdeda2983d622d6d8d0ac2de"
+  },
+  {
+    "name": "ponytail:ponytail-review",
+    "path": "ponytail/ponytail-review/SKILL.md",
+    "version": "2.0.0",
+    "source": "installed-plugin:ponytail",
+    "sha256": "5e0fd5dc55adba28f503645c3492a2d566d9521f28bece92db5d25ebbfb9f173"
+  },
+  {
+    "name": "trailofbits:insecure-defaults",
+    "path": "trailofbits/insecure-defaults/SKILL.md",
+    "version": "9ea55c598763f7cb87ab56933d773d7dc34344a0",
+    "source": "https://github.com/trailofbits/skills",
+    "license": "CC-BY-SA-4.0",
+    "attribution": "Trail of Bits; source files unmodified",
+    "sha256": "b1b95a2fa5b661a20c3812912f49d1063533dc7dbef726e70c9757424b6cdcbc"
+  },
+  {
+    "name": "writing:writing-clearly-and-concisely",
+    "path": "writing/writing-clearly-and-concisely/SKILL.md",
+    "version": "05fc4f0d2b97b7c042dd9949ad658568e4a1324e",
+    "source": "https://github.com/obra/the-elements-of-style",
+    "license": "Public Domain",
+    "sha256": "1448ea19147b339ce37ae70551b233bb329d6bdfa46f0bf627b43b6133372233"
+  }
+]

@@ -202,6 +202,12 @@ export async function removeSkill(
   skillsDir: string,
   deleteFiles: boolean = false,
 ): Promise<void> {
+  // Namespaced bundles are managed in the native registry, not under skillsDir.
+  if (name.includes(':') && db.getSkillByName(name)) {
+    if (deleteFiles) throw new Error('Bundled skill files are read-only; disable the skill instead');
+    db.removeSkill(name);
+    return;
+  }
   // Validate name to prevent path traversal/injection
   if (!SKILL_NAME_RE.test(name)) {
     throw new Error(`Invalid skill name: "${name}". Must match ${SKILL_NAME_RE.source}`);

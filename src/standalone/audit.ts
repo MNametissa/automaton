@@ -1,3 +1,6 @@
+import { getAnalysisToolsReadiness } from '../integrations/analysis-tools.js';
+import { getQualityState } from '../orchestration/quality.js';
+import { runtimeSkills, STARTUP_SKILLS } from '../skills/runtime.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AutomatonTool, ToolContext } from '../types.js';
@@ -41,17 +44,22 @@ export async function auditStartup(context: ToolContext, tools: AutomatonTool[])
     modelAdvertised = (await conway.listModels()).some(m => m.id === config.inferenceModel);
     if (!modelAdvertised) blockers.push('model: configured model is not advertised by the gateway');
   } catch { blockers.push('model: gateway catalog is unavailable'); }
+  const skills = runtimeSkills(db.raw).map(skill => ({ name: skill.name, description: skill.description }));
+  for (const name of STARTUP_SKILLS) if (!skills.some(skill => skill.name === name)) blockers.push(`skills: required startup skill missing or disabled: ${name}`);
   const goals = getActiveGoals(db.raw).map(g => ({ id: g.id, title: g.title, status: g.status }));
   const tasks = db.raw.prepare('SELECT status, COUNT(*) AS count FROM task_graph GROUP BY status').all();
+  const analysisTools = await getAnalysisToolsReadiness();
   const audit = {
     timestamp: new Date().toISOString(), status: blockers.length ? 'blocked' : 'ready',
     mission, workspace, stateIntegrity: integrity, model: config.inferenceModel, modelAdvertised,
     modelInferenceTested: false, accountingMode: 'simulation', externalSpendLimitCents: 0,
-    allocationCents, goals, tasks, previousTurns: db.getTurnCount(),
+    allocationCents, goals, tasks, skills, quality: getQualityState(db.raw), previousTurns: db.getTurnCount(),
     tools: tools.map(t => t.name), blockers,
+    analysisTools: Object.fromEntries(Object.entries(analysisTools).map(([name, result]) => [name, { available: result.available, error: result.error, exitCode: result.exitCode }])),
     limitations: ['Tool inventory is registration, not a successful live test of every tool.',
+      'Skill load receipts prove delivery of instructions, not model compliance.',
       'No executable MCP transport or browser/desktop adapter is provided.',
-      'Native result verification is heuristic; completion requires task-specific evidence.'],
+      'Acceptance checks establish their stated scope only; report semantics and missing criteria require additional evidence.'],
     recovery: 'Retry transient failures within limits; choose another authorized approach; checkpoint blocked work and continue independent goals. Retry unavailable prerequisites on a later wake. Never fabricate access, funds, or successful results.',
   };
   db.setKV('startup.audit', JSON.stringify(audit));

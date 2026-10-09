@@ -1,5 +1,7 @@
+import { recordQualityFailure } from './quality.js';
 import type { Database } from "better-sqlite3";
 import { ulid } from "ulid";
+import { goalRequiresVerification, goalIsVerified } from '../verification/tasks.js';
 import {
   getGoalById,
   getReadyTasks as getReadyTaskRows,
@@ -258,6 +260,7 @@ export function assignTask(db: Database, taskId: string, agentAddress: string): 
 }
 
 export function completeTask(db: Database, taskId: string, result: TaskResult): void {
+  if (!result.success) throw new Error('Cannot complete a task with a failed result');
   withTransaction(db, () => {
     const task = getTaskById(db, taskId);
     if (!task) {
@@ -297,6 +300,7 @@ export function failTask(db: Database, taskId: string, error: string, shouldRetr
       duration: 0,
     };
 
+    if (goalRequiresVerification(db, task.goalId)) recordQualityFailure(db, { taskId, goalId: task.goalId, attempt: task.retryCount, kind: 'execution', detail: error });
     const canRetry = shouldRetry && task.retryCount < task.maxRetries;
     if (canRetry) {
       const nextStatus: TaskStatus = areDependenciesSatisfied(db, task.dependencies)
@@ -629,7 +633,7 @@ function unblockReadyBlockedTasks(db: Database): void {
   ).run();
 }
 
-function refreshGoalStatus(db: Database, goalId: string): void {
+export function refreshGoalStatus(db: Database, goalId: string): void {
   const goal = getGoalById(db, goalId);
   if (!goal || goal.status === "paused") {
     return;
@@ -648,6 +652,10 @@ function refreshGoalStatus(db: Database, goalId: string): void {
   }
 
   if (progress.completed === progress.total) {
+    if (goalRequiresVerification(db, goalId) && !goalIsVerified(db, goalId)) {
+      updateGoalStatus(db, goalId, 'active');
+      return;
+    }
     updateGoalStatus(db, goalId, "completed");
     return;
   }

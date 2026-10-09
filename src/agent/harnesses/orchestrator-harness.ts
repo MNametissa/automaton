@@ -1,4 +1,6 @@
 import path from "node:path";
+import { CHECKS_DESCRIPTION } from '../../verification/runner.js';
+import { taskEvidence, taskIsVerified, verifyTask } from '../../verification/tasks.js';
 import type { TaskGraphRow } from "../../state/database.js";
 import { getTaskById, getTasksByGoal } from "../../state/database.js";
 import { loadPlan } from "../../orchestration/plan-mode.js";
@@ -36,6 +38,26 @@ export class OrchestratorHarness extends BaseHarness {
   private plannerError: string | null = null;
   private planTaskIdByIndex = new Map<number, string>();
 
+  override async execute(): Promise<TaskResult> {
+    const result = await super.execute();
+    if (result.success && !await this.verifyManagedCompletion()) {
+      return { ...result, success: false, output: 'Orchestration is not verified: delegated work is unfinished, lacks executable checks, or failed verification.' };
+    }
+    return result;
+  }
+
+  private async verifyManagedCompletion(): Promise<boolean> {
+    const tasks = this.getManagedTasks();
+    if (!tasks.length) return false;
+    for (const task of tasks) {
+      if (!taskIsVerified(this.context.db, task.id)) return false;
+      const evidence = taskEvidence(this.context.db, task.id)!;
+      const report = await verifyTask(this.context.db, task.id, evidence.criteria, evidence.checks, this.context.allowedEditRoot, this.context.abortSignal);
+      if (report.status !== 'passed') return false;
+    }
+    return true;
+  }
+
   override async initialize(task: TaskNode, context: Parameters<BaseHarness["initialize"]>[1]): Promise<void> {
     await super.initialize(task, context);
     this.refreshDelegatedTaskState();
@@ -53,7 +75,7 @@ export class OrchestratorHarness extends BaseHarness {
     }
 
     this.messages = [
-      { role: "system", content: this.buildSystemPrompt() },
+      { role: "system", content: this.composeSystemPrompt() },
       { role: "user", content: this.buildTaskPrompt() },
     ];
   }
@@ -77,11 +99,11 @@ You follow a strict planner-backed plan → execute → verify → fix cycle:
 
 ## Rules
 
-1. NEVER execute code yourself. You are a coordinator, not an executor.
+1. Delegate implementation; use verify_result to run bounded acceptance checks.
 2. Prefer delegate_task(plan_task_index=...) over rewriting planned tasks manually.
 3. Do not delegate the same planned task twice; if a task already exists, reuse it.
 4. Always verify completed sub-tasks before reporting completion.
-5. If all sub-tasks succeed, call task_done with a consolidated summary.
+5. If all sub-tasks have passed executable checks, call task_done with a consolidated summary.
 6. If fix cycles are exhausted, call task_done with the best partial result and the blocker.
 7. Do NOT create circular dependencies between sub-tasks.
 
@@ -321,14 +343,15 @@ You follow a strict planner-backed plan → execute → verify → fix cycle:
       },
       {
         name: "verify_result",
-        description: "Verify that a completed task's output meets the success criteria. Runs a lightweight check.",
+        description: 'Run measurable checks on a completed task. Prose is not evidence. ' + CHECKS_DESCRIPTION,
         parameters: {
           type: "object",
           properties: {
             task_id: { type: "string", description: "The task ID to verify" },
             criteria: { type: "string", description: "The success criteria to check against" },
+            checks: { type: 'array', items: { type: 'object' }, description: CHECKS_DESCRIPTION },
           },
-          required: ["task_id", "criteria"],
+          required: ["task_id", "criteria", "checks"],
         },
         execute: async (args) => {
           const taskId = args.task_id as string;
@@ -339,20 +362,14 @@ You follow a strict planner-backed plan → execute → verify → fix cycle:
           const result = normalizeTaskResult(task.result);
           if (!result) return `Task ${taskId} has no result data`;
 
-          const criteriaTerms = criteria.toLowerCase().split(/\s+/u).filter((term) => term.length > 3);
-          const outputLower = result.output.toLowerCase();
-          const matched = criteriaTerms.filter((term) => outputLower.includes(term));
-          const matchRatio = criteriaTerms.length > 0 ? matched.length / criteriaTerms.length : 1;
-
-          if (matchRatio >= 0.5) {
-            return `VERIFIED: Task output appears to meet criteria (${Math.round(matchRatio * 100)}% term match). Output preview: ${result.output.slice(0, 300)}`;
-          }
+          const report = await verifyTask(this.context.db, taskId, criteria, args.checks, this.context.allowedEditRoot, this.context.abortSignal);
+          if (report.status === 'passed') return `VERIFIED CHECKS: ${JSON.stringify(report)}. This proves the supplied checks, not unstated criteria.`;
 
           const taskNode = taskRowToTaskNode(task);
           let replanNote = "";
           if (this.planVersion < MAX_FIX_CYCLES + 1) {
             try {
-              const note = `Verification failed (${Math.round(matchRatio * 100)}% term match). Missing terms: ${criteriaTerms.filter((term) => !outputLower.includes(term)).join(", ")}`;
+              const note = `Verification ${report.status}: ${JSON.stringify(report.checks)}`;
               const refreshed = await this.refreshPlanInternal({
                 verificationFailureTask: createPlannerFailureFromVerification({
                   task: taskNode,
@@ -367,7 +384,7 @@ You follow a strict planner-backed plan → execute → verify → fix cycle:
             }
           }
 
-          return `VERIFICATION FAILED: Task output may not meet criteria (${Math.round(matchRatio * 100)}% term match). Missing terms: ${criteriaTerms.filter((term) => !outputLower.includes(term)).join(", ")}. Output preview: ${result.output.slice(0, 300)}.${replanNote}`;
+          return `VERIFICATION FAILED (${report.status}): ${JSON.stringify(report.checks)}.${replanNote}`;
         },
       },
       {
@@ -384,6 +401,7 @@ You follow a strict planner-backed plan → execute → verify → fix cycle:
         execute: async (args) => {
           const summary = args.summary as string;
           const success = args.success !== false;
+          if (success && !await this.verifyManagedCompletion()) return 'NOT COMPLETE: verify all finished delegated tasks with executable checks before reporting success.';
           return `TASK_COMPLETE:${success ? "SUCCESS" : "FAILURE"}:${summary}`;
         },
       },
