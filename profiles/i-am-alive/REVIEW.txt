@@ -303,7 +303,7 @@ doit rapprocher les effets des journaux avant de reprendre le travail.
 
 Supervisor relance les services techniques en cas de crash. Le processus agent et
 l'observateur Runpod restent STOPPED : aucun endpoint d'inférence ni secret Runpod
-n'est configuré. Le profil desktop réapplique agent autostart=false à chaque démarrage.
+n'est configuré. Dans la version initiale 9acef10, le profil desktop réappliquait agent autostart=false à chaque démarrage.
 Démarrer le bureau n'active donc pas automatiquement les missions. Il faudra configurer
 et tester le modèle puis fixer l'activation persistante avant exploitation autonome.
 L'audit réel confirme Playwright CLI, REA, Mimic et les 26 skills disponibles, avec
@@ -323,3 +323,65 @@ https://github.com/microsoft/playwright-cli
 https://www.npmjs.com/package/@playwright/cli/v/0.1.22
 https://github.com/novnc/noVNC
 https://github.com/LibreChat-AI/LibreChat/tree/v0.8.8
+
+12. Comptabilité, autoaudit et séparation du contrôle — correction suivante
+
+Le rapport financier distingue apports, recettes clients, crédits achetés,
+consommation, transferts internes et mouvements non qualifiés. La migration 14
+ajoute operation_ref : les vues d'une même dépense sont rapprochées ; des montants
+contradictoires restent visibles et non résolus. Les achats prépayés ne sont ni
+des ventes ni une seconde charge de consommation. Le bénéfice complet reste
+inconnu tant que les comptes externes ne sont pas rapprochés.
+
+Chaque lancement standalone prépare un nouvel autoaudit rédigé par le modèle,
+avant les missions et les workers. Les réveils conservent le bilan de la session.
+Le modèle choisit ses observations, charge des instructions utiles et produit un
+journal fondé sur les résultats d'outils. Il peut contacter l'opérateur pendant
+l'audit et prendre connaissance des réponses sans déclencher une mission prématurée.
+La réussite des tests simulés n'établit pas sa compétence avec un modèle réel.
+
+Le profil desktop sépare le contrôleur root des programmes agent UID 1000.
+/control contient les limites/configurations, le socket de supervision et les
+secrets privés. L'activation persiste dans /control/agent-activation.json et reste
+désactivée par défaut. Les accès SQLite à l'état de l'agent sont exécutés sans
+privilèges. Le navigateur et VNC restent des processus utilisateur. Cette séparation
+n'est pas une garantie universelle sur tous les comptes et portefeuilles possibles.
+
+Le support d'inférence locale est conservé ; aucun modèle local n'est actif.
+Un endpoint d'infrastructure dédiée peut être
+configuré dans /control/providers/inference.json, avec clé privée séparée, modèle,
+activation et échéance. Son allocation déclarée ne prouve pas le solde fournisseur ;
+les coûts inconnus restent inconnus. Aucune nouvelle ressource Runpod ni inférence
+payante n'a été créée dans cette correction. L'ancien pod a été supprimé par l'opérateur.
+
+contact_operator et operator_contact_status fournissent un canal de contact général,
+sans imposer une stratégie de recharge. /control/operator-contact.json contient le
+destinataire privé et les paramètres SMTP. Sans expéditeur configuré, les demandes
+restent en file ; smtp_accepted ne signifie pas reçu ou lu. Aucun mail externe
+n'a été envoyé pendant les tests. Les dépendances utilisent Nodemailer 10.0.16.
+
+Validation du code : suite complète 1 830 tests réussis, 2 optionnels ignorés ;
+après les derniers ajustements, 57 tests ciblés réussis. Typecheck et build réussis.
+Contrôleur : 54 tests réussis, 3 propres à l'environnement ignorés ; 7 scénarios
+natifs de compatibilité réussis. Vérifications OS root séparées : frontière 4/4,
+pont d'état 2/2. L'état exact du déploiement est dans deployment.review.json.
+
+Livraison locale vérifiée le 9 octobre 2026 : migration testée sur une copie,
+sauvegarde privée créée avant migration, schéma 14 et 5 messages conservés.
+Contrôleur dans l'image : 55 tests réussis, 2 réservés à root ignorés ; contrôle
+OS root séparé 4/4. Compatibilité native 7/7. Les 30 fichiers de production
+comparés dans le conteneur correspondent au code livré.
+
+Un défaut réel de reprise Chromium a été corrigé : les liens Singleton laissés
+par l'ancien conteneur sont retirés via UID 1000 au bootstrap, avant tout navigateur.
+Le volume d'état doit appartenir à une seule instance runtime ; ne pas partager
+les mêmes profils avec plusieurs conteneurs actifs. Deux tests couvrent ce
+nettoyage et la conservation du profil. Chromium a ensuite ouvert la fixture,
+rempli/cliqué, capturé une image et retrouvé les données persistantes après
+remplacement du conteneur. LibreChat et noVNC revus aux trois tailles d'écran.
+
+Configuration active : inférence awaiting_provider, agent arrêté, destinataire
+opérateur configuré en privé, SMTP absent. Aucun revenu, envoi externe ou dépense
+payante n'a été produit par ces validations. Les tests ne démontrent pas une
+autonomie commerciale réelle. La connexion MCP Runpod reste à rétablir dans la
+session malgré la réussite de son authentification OAuth.

@@ -1,14 +1,26 @@
 {
   "schemaVersion": 1,
   "purpose": "Review specification; not a runtime config or an executable deployment",
-  "identity": { "name": "I AM Alive", "slug": "i-am-alive", "operator": "MNametissa" },
-  "activation": { "approved": false, "approvedAt": null, "launchEnabled": false },
-  "mission": { "sourceFile": "genesis.txt", "language": "fr", "applyAs": "AutomatonConfig.genesisPrompt" },
+  "identity": {
+    "name": "I AM Alive",
+    "slug": "i-am-alive",
+    "operator": "MNametissa"
+  },
+  "activation": {
+    "approved": false,
+    "approvedAt": null,
+    "launchEnabled": false
+  },
+  "mission": {
+    "sourceFile": "genesis.txt",
+    "language": "fr",
+    "applyAs": "AutomatonConfig.genesisPrompt"
+  },
   "runtime": {
     "repository": "https://github.com/MNametissa/automaton",
     "preparationBranch": "feat/standalone-runtime",
-    "releaseCommit": null,
-    "releaseImageDigest": null,
+    "releaseCommit": "5071e03303dada6539f3dd5aaf71224abf4ef456",
+    "releaseImageDigest": "sha256:e4cb9031f8aeaeb27a0a8e266f7f4edcd9338c38eae50af4f523c3be4a7133fe",
     "name": "I AM Alive",
     "logLevel": "debug",
     "persistentRoot": "/workspace/i-am-alive",
@@ -30,7 +42,9 @@
     "endpoint": null,
     "selectionCriterion": "Measured cost per accepted delivery on software, website and sourced-report missions",
     "configureMainAndWorkerRoutesTogether": true,
-    "paidFallbackEnabled": false
+    "paidFallbackEnabled": false,
+    "configurationState": "awaiting_provider",
+    "privateConfigFile": "/control/providers/inference.json"
   },
   "finance": {
     "currency": "USD",
@@ -43,7 +57,10 @@
     "providerBalanceIsSpendingPermission": false,
     "existingSharedAccountResourcesBelongToAgent": false,
     "universalBudgetEnforcementImplemented": false,
-    "profitAccountingReady": false
+    "profitAccountingReady": false,
+    "classifiedLedgerImplemented": true,
+    "stableOperationReferenceDeduplicationImplemented": true,
+    "ledgerSchemaVersion": 14
   },
   "runpod": {
     "accountConfirmed": false,
@@ -74,7 +91,12 @@
     "preferredIdentity": "GitHub App installed on MNametissa/automaton",
     "appDisplayName": "I AM Alive",
     "nameAvailabilityVerified": false,
-    "permissionsProposed": { "metadata": "read", "contents": "write", "pullRequests": "write", "checks": "read" },
+    "permissionsProposed": {
+      "metadata": "read",
+      "contents": "write",
+      "pullRequests": "write",
+      "checks": "read"
+    },
     "branchPrefix": "alive/",
     "automaticPromotionEnabled": false,
     "credentialHandoffCompleted": false,
@@ -122,13 +144,54 @@
     "agentAutostart": false,
     "inferenceConfigured": false,
     "externalSpendCents": 0,
-    "runtimeImageId": "sha256:2703b00010ec1773b5c4c70ad03d63602e8396c121a3a47198a76bfbe2d77662",
+    "runtimeImageId": "sha256:e4cb9031f8aeaeb27a0a8e266f7f4edcd9338c38eae50af4f523c3be4a7133fe",
     "libreChatImage": "registry.librechat.ai/librechat-ai/librechat-api:v0.8.8@sha256:e031d2dbe70f8bcaa697f395f735ada9c6710fc8648bed373e06f7747ec36e71",
     "libreChatVerifiedAmd64Manifest": "sha256:e031d2dbe70f8bcaa697f395f735ada9c6710fc8648bed373e06f7747ec36e71",
     "runtimeRecoveredAfterSigkill": true,
     "libreChatUiVerified": true,
     "libreChatHistorySurvivedRestart": true,
     "heartbeatProfileInstalled": true,
-    "heartbeatRunning": false
+    "heartbeatRunning": false,
+    "controllerIsolationDeployed": true,
+    "controllerUid": 0,
+    "agentUid": 1000,
+    "activationPersisted": true,
+    "privateControlDirectory": "/control",
+    "migrationTestedOnCopy": true,
+    "backupBeforeMigrationCreated": true,
+    "browserRecoveryAfterContainerReplacementVerified": true,
+    "operatorContactConfigured": true,
+    "operatorSmtpConfigured": false,
+    "operatorExternalEmailSent": false,
+    "modelStartupAuditImplemented": true,
+    "modelStartupAuditLiveVerified": false,
+    "verifiedAt": "2026-10-09",
+    "sourceFilesComparedWithDeployedImage": 30,
+    "verification": {
+      "fullVitestBeforeFinalReview": {
+        "passed": 1830,
+        "skipped": 2
+      },
+      "finalAffectedVitest": {
+        "passed": 57,
+        "files": 6
+      },
+      "imageControllerTests": {
+        "passed": 55,
+        "skipped": 2
+      },
+      "imageCompatibilityScenarios": 7,
+      "rootBoundaryTests": 4,
+      "browserRecoveryTests": 2,
+      "schemaVersion": 14,
+      "preservedInboxMessages": 5,
+      "bundledSkills": 26,
+      "browserDomFormScreenshotAndPersistedProfile": true,
+      "userUiViewports": [
+        "1440x900",
+        "1024x420",
+        "390x844"
+      ]
+    }
   }
 }
