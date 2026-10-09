@@ -1,4 +1,5 @@
 import { createAnalysisTools } from '../../integrations/analysis-tools.js';
+import { createRunpodStatusTool } from '../../integrations/runpod.js';
 import { sanitizeToolResult } from '../injection-defense.js';
 import { skillContext, harnessSkillTools } from '../../skills/runtime.js';
 import { createLogger } from "../../observability/logger.js";
@@ -97,7 +98,7 @@ export abstract class BaseHarness implements AgentHarness {
   async execute(): Promise<TaskResult> {
     this.context.budget.startedAt = Date.now();
 
-    const skillTools = [...harnessSkillTools(this.context.db, this.task.id), ...createAnalysisTools({ workspace: this.context.allowedEditRoot }).map(tool => ({
+    const skillTools = [...harnessSkillTools(this.context.db, this.task.id), ...[...createAnalysisTools({ workspace: this.context.allowedEditRoot }), createRunpodStatusTool()].map(tool => ({
       name: tool.name, description: tool.description, parameters: tool.parameters,
       execute: async (args: Record<string, unknown>) => sanitizeToolResult(await tool.execute(args, this.context.toolContext!), 16000),
     }))];

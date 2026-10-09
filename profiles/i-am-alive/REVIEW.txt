@@ -1,0 +1,186 @@
+I AM Alive — dossier de préparation du 9 octobre 2026
+
+1. Ce qui est prêt pour ta relecture
+
+genesis.txt contient le mandat proposé complet : finalité économique, stratégie,
+exécution commerciale, finances, choix des outils, évolution GitHub, mémoire et
+journal de décisions. Tu peux le modifier directement. Ce texte n'est pas encore
+installé dans un état personnel ou utilisé par un agent lancé.
+
+deployment.review.json rassemble les réglages proposés et leur état réel.
+C'est une spécification lisible par machine, pas un automaton.json exécutable.
+Aucun champ de ce fichier ne provisionne un service ni n'applique une limite.
+Les valeurs nulles sont des prérequis encore absents, pas des secrets masqués
+ni des valeurs par défaut que le déploiement doit inventer.
+
+Le runtime transmet désormais la mission entière dans la couche Genesis,
+après nettoyage des marqueurs de rôle, au lieu de la couper à 2 000 caractères.
+Il conserve ses autres règles et son budget de contexte : la longueur du mandat
+consomme du contexte et devra être évaluée avec le modèle choisi.
+
+2. Architecture proposée
+
+Option retenue pour préparation : un état durable séparé, un modèle choisi par
+mesure, le runtime existant et un observateur Runpod. Une GitHub App représente
+l'agent sur le fork. Le cycle de publication d'une version et les dépenses
+fournisseur sont contrôlés hors du code candidat modifiable par l'agent.
+
+Autres options :
+- Réutiliser le compte GitHub personnel dans le runtime : préparation rapide,
+  mais attribution des actions et séparation des accès moins nettes.
+- Créer un compte machine GitHub distinct : possible avec création humaine,
+  mais impose un compte, une adresse et la gestion d'authentification associés.
+
+Le nom affiché est I AM Alive ; aucune disponibilité d'identifiant ou de nom
+GitHub App n'est encore confirmée. Aucune identité de service n'a été créée.
+
+3. Runpod : raccordement livré et accès manquant
+
+L'outil natif runpod_status est exposé au principal et aux travailleurs.
+Il effectue une requête GraphQL fixe en lecture seule, avec délai de dix secondes,
+sans redirection, sans opération de création, d'arrêt ou de recharge.
+Il accepte une clé par RUNPOD_API_KEY_FILE (prioritaire) ou RUNPOD_API_KEY.
+Le fichier doit être régulier, non accessible au groupe/autres, et ne pas être
+un lien symbolique. Son contenu n'est ni journalisé ni inclus dans le prompt.
+
+Données observées : solde du compte en USD, débit horaire déclaré, pods,
+coût horaire du pod, état demandé, durée de fonctionnement, utilisation GPU,
+mémoire GPU, CPU et mémoire du conteneur. Les données absentes restent nulles.
+Une réponse partielle ou invalide est une erreur, jamais un solde zéro.
+Le solde concerne tout le compte ; il ne constitue pas le budget de l'agent.
+L'heure de récupération ne prouve pas l'heure de mesure interne du fournisseur.
+
+Depuis la racine du dépôt, après compilation avec Node 22 :
+  node conway-local/runpod-status.mjs
+  node conway-local/runpod-status.mjs --watch
+
+La seconde commande interroge toutes les 60 secondes après la réponse précédente
+et écrit une ligne JSON par observation. Elle ne lance pas l'agent et n'installe
+pas un service de monitoring. Une erreur remplace l'observation de ce passage ;
+la CLI ne transforme pas une ancienne mesure en nouvelle donnée valide.
+Quand l'agent utilise l'outil, le résultat est aussi écrit dans runpod.snapshot.
+
+La connexion MCP https://mcp.getrunpod.io est référencée dans les configurations
+locales. Cette référence n'est pas une clé API exportable vers notre runtime.
+Aucune clé n'a été trouvée dans les emplacements de configuration inspectés.
+L'emplacement du secret a été demandé à l'opérateur. Aucun solde réel n'a été
+consulté et aucun droit réel de la future clé n'a été vérifié.
+
+La lecture seule de l'outil est une propriété de ses requêtes, pas une réduction
+des droits d'une clé trop large. Avec un shell sous le même utilisateur, la clé
+injectée reste techniquement accessible au processus. Pour une séparation forte,
+le collecteur et le signataire/budget doivent vivre sous une identité distincte.
+
+4. Budget et chaîne financière
+
+L'autorisation de dépense connue reste 0 USD. Rien n'a alimenté le portefeuille,
+acheté des crédits ou créé une ressource Runpod pendant cette préparation.
+Les charges des ressources déjà présentes dans ton compte ne sont ni arrêtées
+ni limitées par cette préparation. Leur éventuelle existence reste à observer.
+
+La première activation économique exige un plafond total, quotidien, par achat,
+un coût horaire maximal et une réserve. Il faut compter les engagements réels,
+le stockage, le calcul, les API, les frais et les abonnements. La surveillance
+d'un solde ne suffit pas à imposer ces limites.
+
+Avant d'afficher un bénéfice, corriger la comptabilité native : credit_purchase
+est actuellement classé comme revenu dans report_metrics et certaines dépenses
+x402 ne sont pas comptées. Séparer apport, vente, transfert, prépaiement,
+consommation, remboursement et frais. Le wallet ne fournit pas le circuit
+commande → encaissement vérifié → livraison ; ce circuit marchand reste à câbler.
+
+5. GitHub et évolution autonome
+
+gh authentifie actuellement MNametissa ; le fork MNametissa/automaton existe et
+le compte dispose du rôle ADMIN. Cela ne donne pas encore des credentials à
+I AM Alive. Aucun token personnel n'a été copié dans un conteneur ou un dépôt.
+
+Préférence proposée : GitHub App limitée au fork, jetons d'installation temporaires,
+branches alive/*, contenu et pull requests en écriture, checks en lecture.
+Le runtime possède déjà des outils Git. Le mécanisme complet candidat → tests →
+promotion → surveillance → retour arrière reste à construire et à vérifier.
+La bascule automatique de la version active n'est pas activée.
+
+GitHub documente une création humaine pour les comptes machine. Une GitHub App
+permet une identité d'automatisation sans demander à l'agent de s'inscrire comme
+une personne. Sa création et son installation restent à effectuer après revue.
+
+Un précédent push de cette branche a été refusé par la revue automatique
+d'autorisation. La présente préparation reste locale ; ce refus n'a pas été
+contourné. Le fork distant n'est donc pas une sauvegarde de tous ces changements.
+
+6. Suivi humain et réflexion observable
+
+Le runtime conserve déjà les tours, appels d'outil, tâches et coûts estimés dans
+SQLite. Les CLI natives proposent status et logs. Elles ne constituent pas un
+tableau de bord Runpod et les coûts de tokens ne sont pas une facture fournisseur.
+
+Le mandat demande un journal structuré : objectif, faits, hypothèses, décision,
+justification synthétique, action, résultat, coût et suite. Ce n'est pas un accès
+au raisonnement interne privé du modèle. La conformité de ce journal reste à
+observer sur un vrai modèle et à intégrer dans le monitoring.
+
+report_metrics existe mais sa programmation n'est pas active par défaut.
+Le profil propose un passage toutes les cinq minutes. Le tableau de bord,
+le service de collecte et leur démarrage persistant restent à installer.
+
+7. Ordre de mise en service après validation
+
+A. Appliquer les corrections demandées au mandat et au dossier. Fixer les
+   montants, le compte Runpod, le périmètre des ressources et le canal commercial.
+B. Vérifier la clé sur une lecture réelle du compte, puis identifier séparément
+   les ressources de l'agent. Ne rien déduire du nom d'un pod ou de sa présence.
+C. Préparer et tester le contrôle externe de budget et d'arrêt des ressources.
+   Distinguer arrêt du processus, arrêt du pod et coûts de stockage résiduels.
+D. Sélectionner un modèle à partir des trois missions, dans le budget approuvé.
+   Configurer ensemble boucle principale, planificateur et travailleurs.
+E. Provisionner l'identité GitHub retenue. Tester clone, branche, commit et
+   publication candidate sur le dépôt autorisé, sans exposer les secrets.
+F. Déployer un état dédié persistant, son backup et un superviseur. Initialiser
+   un wallet séparé ; vérifier sauvegarde/reprise avant tout dépôt d'argent.
+G. Corriger la comptabilité puis tester le circuit commercial complet, y compris
+   déduplication, reprise et rapprochement, avant de promettre une vente réelle.
+H. Démarrer l'exploitation validée avec suivi des premières commandes, coûts,
+   erreurs et marges. Autoriser la promotion automatique des versions seulement
+   quand son test de retour arrière et ses critères ont été validés.
+
+8. Critères de lancement vérifiables
+
+- Le processus reçoit le mandat validé entier et affiche sa version.
+- La clé correspond au compte Runpod choisi ; aucune clé n'apparaît dans les logs.
+- Le monitoring distingue crédit, permission de dépense, coût et revenu.
+- Une API indisponible produit une donnée inconnue/périmée et un état explicite.
+- Le redémarrage restaure portefeuille, tâches, paiements et journaux.
+- Le budget est imposé au-delà du prompt et couvre la création de ressources.
+- L'agent peut consulter les skills et exécuter REA/Mimic sur des cas réels utiles.
+- Chaque route d'inférence utilise le fournisseur choisi, sans repli payant caché.
+- Une mauvaise version candidate ne remplace pas silencieusement la version active.
+- Une recette affichée est reliée à un encaissement réel et à une commande.
+- La première mission commerciale a un acheteur/canal plausible et une limite
+  d'expérimentation ; aucune rentabilité n'est affirmée avant observation.
+
+9. Validation de cette préparation
+
+Typecheck et compilation du runtime/CLI réussis. Suite complète : 75 fichiers,
+1 750 tests réussis et un test opt-in ignoré. Dix tests du nouvel adaptateur
+couvrent entre autres montants, erreurs, clés absentes, fichier privé, symlinks,
+absence de fuite dans les erreurs et nettoyage des noms de pods avant le modèle.
+Le test natif de contexte vérifie désormais la conservation de la mission entière.
+
+La CLI compilée, sans clé, renvoie missing_credentials avec sortie 1 ; le mode
+watch termine proprement sur SIGTERM. Aucun test de cette intégration n'a utilisé
+une vraie clé Runpod. Les métriques fournisseur restent non observées en réel.
+Le test REA/Mimic opt-in ignoré par cette suite n'est pas une validation renouvelée
+des binaires tiers. Aucun nouveau conteneur ou déploiement n'a été construit ici.
+
+La commande cm close ne prend pas en charge ce projet CLI TypeScript sans cible
+Next.js/Odoo : sortie d'usage 2, pas une porte de validation réussie. La vérification
+effectuée est celle des tests, du build, de la sonde CLI et de la revue de code.
+
+Sources officielles consultées le 9 octobre 2026 :
+https://docs.runpod.io/get-started/credentials
+https://docs.runpod.io/sdks/graphql/configurations
+https://docs.runpod.io/sdks/graphql/manage-pods
+https://graphql-spec.runpod.io/
+https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys
+https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps

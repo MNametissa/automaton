@@ -71,6 +71,29 @@ Pour un objectif complexe : objectif → classification → plan → revue → t
 
 ## Travail restant pour l’autonomie opérationnelle
 
+### Préparation I AM Alive — 9 octobre 2026
+
+Le dossier `profiles/i-am-alive/` contient un mandat complet à relire (`genesis.txt`),
+un manifeste de déploiement **non exécutable** (`deployment.review.json`) et la revue
+des prérequis (`REVIEW.txt`). L'opérateur demande de modifier et valider avant lancement.
+Le nom retenu est I AM Alive. Aucun état personnel, wallet ou credential n'est écrasé.
+
+La mission n'est plus coupée à 2 000 caractères dans le prompt système. L'outil natif
+`runpod_status`, principal et travailleurs, observe solde du compte, débit horaire et
+télémétrie des pods en lecture seule. La CLI `node conway-local/runpod-status.mjs --watch`
+offre un polling de 60 secondes sans inférence ni mutation fournisseur. Clé par fichier
+privé `RUNPOD_API_KEY_FILE` ou environnement `RUNPOD_API_KEY` ; erreurs sans secret.
+Le compte entier n'est pas l'enveloppe de l'agent. Le raccordement réel reste à vérifier
+avec une clé fournie ; la référence MCP locale n'est pas une clé remise au runtime.
+
+`gh` confirme MNametissa et son accès ADMIN au fork. L'identité GitHub d'exploitation
+n'est pas créée. Une GitHub App sur ce dépôt est proposée ; son provisionnement,
+la promotion de versions, le superviseur persistant, le contrôleur de budget commun,
+le monitoring continu et le circuit marchand restent à réaliser après revue.
+Le budget externe demeure 0 $. Aucune ressource payante ni aucun modèle lancé.
+
+### Priorités suivantes
+
 1. Priorité économique : relier une offre réelle à des clients, commandes, paiements reçus vérifiés, livraisons et coûts fournisseurs. Le portefeuille récepteur et les paiements sortants ne constituent pas ce circuit marchand. Corriger la comptabilité avant toute mesure de rentabilité : le rapport heartbeat classe encore credit_purchase comme revenu et ne couvre pas tous les décaissements. Un achat de crédits consomme de la trésorerie ; il ne prouve pas une vente.
 2. Compléter la couverture des critères : contrats fixés avant délégation, validation avant déblocage de chaque dépendance, support des piles autres que Node et validation sémantique indépendante des rapports. Les contrôles exécutables remplacent désormais la validation lexicale du coordinateur ; la clôture des objectifs standalone exige ces preuves.
 3. Relier réellement les transports MCP et leurs vérifications de santé avant d’ajouter navigateur ou bureau.

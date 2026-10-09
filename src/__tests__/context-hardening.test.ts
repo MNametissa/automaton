@@ -308,9 +308,10 @@ describe("buildSystemPrompt genesis prompt sanitization", () => {
     expect(prompt).toContain("## End Genesis");
   });
 
-  it("truncates genesis prompt to 2000 chars in system prompt", () => {
+  it("preserves the full genesis mission on later turns", () => {
     const identity = createTestIdentity();
-    const longGenesis = "x".repeat(5000);
+    const longGenesis = "Measure delivered value and actual operating costs.\n".repeat(160)
+      + "Final requirement: reconcile confirmed customer receipts.";
     const config = createTestConfig({ genesisPrompt: longGenesis });
 
     const prompt = buildSystemPrompt({
@@ -330,9 +331,8 @@ describe("buildSystemPrompt genesis prompt sanitization", () => {
     expect(genesisEnd).toBeGreaterThan(genesisStart);
 
     const genesisSection = prompt.slice(genesisStart, genesisEnd);
-    // The content between markers should be <= 2000 chars + marker text
     const contentOnly = genesisSection.replace("## Genesis Purpose [AGENT-EVOLVED CONTENT]\n", "");
-    expect(contentOnly.length).toBeLessThanOrEqual(2000 + 10); // small margin for whitespace
+    expect(contentOnly.trim()).toBe(longGenesis);
   });
 });
 

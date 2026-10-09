@@ -654,9 +654,8 @@ Your chain type is ${chainType}.`,
   // Sanitized as agent-evolved content with trust boundary markers
   if (config.genesisPrompt) {
     const sanitized = sanitizeInput(config.genesisPrompt, "genesis", "skill_instruction");
-    const truncated = sanitized.content.slice(0, 2000);
     sections.push(
-      `## Genesis Purpose [AGENT-EVOLVED CONTENT]\n${truncated}\n## End Genesis`,
+      `## Genesis Purpose [AGENT-EVOLVED CONTENT]\n${sanitized.content}\n## End Genesis`,
     );
   }
 
