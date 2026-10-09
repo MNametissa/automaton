@@ -1,4 +1,3 @@
-import { recordQualityFailure, recordQualitySuccess } from '../orchestration/quality.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -66,8 +65,6 @@ export async function verifyTask(db: Database.Database, taskId: string, criteria
   }
   db.prepare('INSERT OR REPLACE INTO kv (key,value) VALUES (?,?)').run(`verification.task:${taskId}`,
     JSON.stringify({ fingerprint: before, criteria, checks, report, root, inputs } satisfies Evidence));
-  if (report.status === 'failed') recordQualityFailure(db, { taskId, goalId: task.goalId, attempt: task.retryCount, kind: 'verification',
-    detail: JSON.stringify(report.checks.filter(check => check.status === 'failed')) });
   return report;
 }
 
@@ -95,6 +92,5 @@ export async function verifyGoal(db: Database.Database, goalId: string, signal?:
   const after = getTasksByGoal(db, goalId).map(task => [task.id, fingerprint(task)]);
   if (!passed || JSON.stringify(before) !== JSON.stringify(after) || unverifiedTasks(db, goalId).length) return false;
   db.prepare('INSERT OR REPLACE INTO kv (key,value) VALUES (?,?)').run(`verification.goal:${goalId}`, goalFingerprint(db, goalId));
-  recordQualitySuccess(db, goalId);
   return true;
 }

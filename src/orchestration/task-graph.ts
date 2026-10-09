@@ -1,4 +1,3 @@
-import { recordQualityFailure } from './quality.js';
 import type { Database } from "better-sqlite3";
 import { ulid } from "ulid";
 import { goalRequiresVerification, goalIsVerified } from '../verification/tasks.js';
@@ -300,7 +299,6 @@ export function failTask(db: Database, taskId: string, error: string, shouldRetr
       duration: 0,
     };
 
-    if (goalRequiresVerification(db, task.goalId)) recordQualityFailure(db, { taskId, goalId: task.goalId, attempt: task.retryCount, kind: 'execution', detail: error });
     const canRetry = shouldRetry && task.retryCount < task.maxRetries;
     if (canRetry) {
       const nextStatus: TaskStatus = areDependenciesSatisfied(db, task.dependencies)

@@ -145,7 +145,7 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
     fs.rmSync(tempHome, { recursive: true, force: true });
   });
 
-  function createPool(maxTurns?: number): LocalWorkerPool {
+  function createPool(maxTurns?: number, standalone = false): LocalWorkerPool {
     return new LocalWorkerPool({
       db,
       conway: new MockConwayClient(),
@@ -153,7 +153,7 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
       maxTurns,
       harnessRegistry: registry,
       identity: createTestIdentity(),
-      config: createTestConfig(),
+      config: { ...createTestConfig(), standalone },
       allowedEditRoot: process.cwd(),
     });
   }
@@ -177,6 +177,16 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
     expect(row?.result).toMatchObject({ success: true, output: "completed by harness" });
     expect(SuccessHarness.capturedContext?.budget.maxTurns).toBe(7);
     expect(SuccessHarness.capturedContext?.allowedEditRoot).toBe(process.cwd());
+  });
+
+  it.each([-10, 10])('ignores a retired quality score of %s when allocating worker turns', async score => {
+    db.prepare('INSERT OR REPLACE INTO kv (key,value) VALUES (?,?)').run('quality.state', JSON.stringify({ score }));
+    registry.register('custom-success', SuccessHarness);
+    const pool = createPool(20, true);
+    const task = insertTask(db, { id: 'task-no-score', goalId: 'goal-1', agentRole: 'custom-success', status: 'assigned', assignedTo: 'local://worker-test', maxRetries: 0 });
+    await (pool as any).runWorker('worker-test', task, new AbortController().signal);
+    expect(SuccessHarness.capturedContext?.budget.maxTurns).toBe(20);
+    expect(getTaskById(db, task.id)?.status).toBe('completed');
   });
 
   it("marks the task as failed when the harness reports failure", async () => {

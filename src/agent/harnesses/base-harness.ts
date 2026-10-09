@@ -1,6 +1,5 @@
 import { createAnalysisTools } from '../../integrations/analysis-tools.js';
 import { sanitizeToolResult } from '../injection-defense.js';
-import { getQualityState } from '../../orchestration/quality.js';
 import { skillContext, harnessSkillTools } from '../../skills/runtime.js';
 import { createLogger } from "../../observability/logger.js";
 import type { ChatMessage, InferenceToolCall } from "../../types.js";
@@ -45,8 +44,7 @@ export abstract class BaseHarness implements AgentHarness {
   abstract buildSystemPrompt(): string;
 
   protected composeSystemPrompt(): string {
-    return this.buildSystemPrompt() + skillContext(this.context.db, this.task.id) + (this.context.config.standalone
-      ? `\nRuntime quality feedback: ${JSON.stringify(getQualityState(this.context.db))}. Your turn ceiling is ${this.context.budget.maxTurns}. Failures reduce future effort; verified completion and recovery restore it, within the configured maximum. Report errors honestly, repair causes and prove assigned outcomes; unverified claims earn nothing.` : '');
+    return this.buildSystemPrompt() + skillContext(this.context.db, this.task.id);
   }
 
   protected beforeTurn(): void {}

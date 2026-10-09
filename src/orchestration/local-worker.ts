@@ -1,4 +1,3 @@
-import { qualityTurnLimit } from './quality.js';
 /**
  * Local Agent Worker
  *
@@ -138,8 +137,6 @@ export class LocalWorkerPool {
     if (harness.id === "orchestrator" && !this.config.maxTurns) {
       context.budget.maxTurns = Math.max(context.budget.maxTurns, 50);
     }
-
-    if (this.config.config.standalone) context.budget.maxTurns = qualityTurnLimit(this.config.db, context.budget.maxTurns);
 
     logger.info(
       `[WORKER ${workerId}] Starting task "${task.title}" (${task.id}), role: ${task.agentRole ?? "generalist"}, harness: ${harness.id}`,

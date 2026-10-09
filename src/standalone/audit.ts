@@ -1,5 +1,4 @@
 import { getAnalysisToolsReadiness } from '../integrations/analysis-tools.js';
-import { getQualityState } from '../orchestration/quality.js';
 import { runtimeSkills, STARTUP_SKILLS } from '../skills/runtime.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,7 +52,7 @@ export async function auditStartup(context: ToolContext, tools: AutomatonTool[])
     timestamp: new Date().toISOString(), status: blockers.length ? 'blocked' : 'ready',
     mission, workspace, stateIntegrity: integrity, model: config.inferenceModel, modelAdvertised,
     modelInferenceTested: false, accountingMode: 'simulation', externalSpendLimitCents: 0,
-    allocationCents, goals, tasks, skills, quality: getQualityState(db.raw), previousTurns: db.getTurnCount(),
+    allocationCents, goals, tasks, skills, previousTurns: db.getTurnCount(),
     tools: tools.map(t => t.name), blockers,
     analysisTools: Object.fromEntries(Object.entries(analysisTools).map(([name, result]) => [name, { available: result.available, error: result.error, exitCode: result.exitCode }])),
     limitations: ['Tool inventory is registration, not a successful live test of every tool.',

@@ -1,4 +1,3 @@
-import { getQualityState, qualityTurnLimit } from '../orchestration/quality.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -124,29 +123,5 @@ it('reruns all goal checks when a later task invalidates an imported product', a
     refreshGoalStatus(state.raw, goal.id);
     expect(getGoalById(state.raw, goal.id)?.status).toBe('active');
     expect(taskIsVerified(state.raw, a.id)).toBe(false);
-  } finally { state.close(); }
-});
-
-it('penalizes measured failures and restores effort only after a verified repair', async () => {
-  const state = createTestDb(), root = workspace();
-  try {
-    const goal = createGoal(state.raw, 'Repair', 'Output 42'); requireGoalVerification(state.raw, goal.id);
-    decomposeGoal(state.raw, goal.id, [{ parentId: null, goalId: goal.id, title: 'Work', description: 'Output 42', status: 'running', assignedTo: null, agentRole: 'executor', priority: 50, dependencies: [], result: null }]);
-    const task = getTasksByGoal(state.raw, goal.id)[0];
-    completeTask(state.raw, task.id, { success: true, output: 'Claimed success', artifacts: [], costCents: 0, duration: 1 });
-    expect(getQualityState(state.raw).score).toBe(0);
-    const checks = [{ kind: 'node', script: 'check.mjs', expectedExit: 0, expectedJson: 42 }];
-    fs.writeFileSync(path.join(root, 'check.mjs'), 'console.log(0)');
-    await verifyTask(state.raw, task.id, 'Output 42', checks, root);
-    await verifyTask(state.raw, task.id, 'Output 42', checks, root);
-    expect(getQualityState(state.raw)).toMatchObject({ score: -2, failureEvents: 1 });
-    expect(qualityTurnLimit(state.raw, 20)).toBe(12);
-    fs.writeFileSync(path.join(root, 'check.mjs'), 'console.log(42)');
-    await verifyTask(state.raw, task.id, 'Output 42', checks, root);
-    expect(getQualityState(state.raw).score).toBe(-2);
-    expect(await verifyGoal(state.raw, goal.id)).toBe(true);
-    expect(await verifyGoal(state.raw, goal.id)).toBe(true);
-    expect(getQualityState(state.raw)).toMatchObject({ score: 2, verifiedGoals: 1, recoveredGoals: 1 });
-    expect(qualityTurnLimit(state.raw, 20)).toBe(20);
   } finally { state.close(); }
 });
