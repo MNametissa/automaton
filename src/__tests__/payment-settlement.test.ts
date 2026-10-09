@@ -19,13 +19,93 @@ const events = parseAbi([
 const handles: ReturnType<typeof createTestDb>[] = [];
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const db of handles.splice(0)) db.close(); });
 
-function fixture() {
+function fixture(anchor?: bigint) {
   const db = createTestDb(); handles.push(db);
   const ctx = paymentContext(createTestConfig({ paymentLimits: { totalCents: 1000, dailyCents: 1000, maxSingleCents: 1000 } }), db.raw, 'x402_fetch');
   const id = ctx.ledger.reserve({ operationKey: 'fixture', payer, recipient, asset, network: 'eip155:8453', domain: 'api.conway.tech', kind: 'x402_fetch', amountAtomic: '370000' }, ctx.limits);
-  ctx.ledger.submitted(id, nonce); ctx.ledger.uncertain(id, hash);
+  if (anchor !== undefined) ctx.ledger.anchor(id, anchor);
+  ctx.ledger.submitted(id, nonce); ctx.ledger.uncertain(id, anchor === undefined ? hash : undefined);
   return { db, ctx, id };
 }
+
+function recoveryRpc(options: { finalized?: bigint; logs?: ReturnType<typeof receipt>['logs']; raw?: unknown; fail?: string; proof?: ReturnType<typeof receipt> } = {}) {
+  const requests: { method: string; params: any[] }[] = [];
+  vi.stubGlobal('fetch', vi.fn((_url, init) => {
+    const request = JSON.parse(init.body); requests.push(request);
+    if (request.method === options.fail) throw new Error('RPC unavailable');
+    const result = request.method === 'eth_getBlockByNumber' ? { number: `0x${(options.finalized ?? 5000n).toString(16)}`, transactions: [] }
+      : request.method === 'eth_getLogs' ? ('raw' in options ? options.raw : options.logs ?? [])
+      : request.method === 'eth_getTransactionReceipt' ? options.proof ?? receipt() : '0x1389';
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+  }));
+  return requests;
+}
+
+it('scans at most 2000 finalized blocks per wake and resumes the next page without releasing the budget', async () => {
+  const { ctx, id } = fixture(100n);
+  const requests = recoveryRpc();
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(ctx.ledger.get(id)).toMatchObject({ status: 'uncertain', scan_next_block: '2100' });
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(ctx.ledger.get(id)?.scan_next_block).toBe('4100');
+  expect(requests.filter(r => r.method === 'eth_getLogs').map(r => r.params[0])).toMatchObject([
+    { fromBlock: '0x64', toBlock: '0x833' }, { fromBlock: '0x834', toBlock: '0x1003' },
+  ]);
+  const used = ctx.ledger.summary() as { budgetCents: number }[];
+  expect(used[0].budgetCents).toBe(37);
+});
+
+it.each(['eth_getBlockByNumber', 'eth_getLogs', 'eth_getTransactionReceipt'])('keeps the page on %s failure', async fail => {
+  const { ctx, id } = fixture(100n);
+  recoveryRpc({ fail, logs: [receipt().logs[0]] });
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(ctx.ledger.get(id)).toMatchObject({ status: 'uncertain', scan_next_block: '100', tx_hash: null });
+});
+
+it('waits for finalized history and rejects a candidate with the wrong transfer amount', async () => {
+  const { ctx, id } = fixture(100n);
+  let requests = recoveryRpc({ finalized: 99n });
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(requests.some(r => r.method === 'eth_getLogs')).toBe(false);
+  requests = recoveryRpc({ logs: [receipt().logs[0]], proof: receipt(nonce, 1n) });
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(ctx.ledger.get(id)).toMatchObject({ status: 'uncertain', scan_next_block: '100', tx_hash: null });
+});
+
+it('does not confirm removed or out-of-range event candidates', async () => {
+  const { ctx, id } = fixture(100n);
+  recoveryRpc({ logs: [{ ...receipt().logs[0], removed: true }] });
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  recoveryRpc({ logs: [{ ...receipt().logs[0], blockNumber: '0x63' }] });
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(ctx.ledger.get(id)?.scan_next_block).toBe('100');
+});
+
+it.each(['malformed', 'wrong nonce', 'wrong contract'])('never advances a nonempty page containing %s', async variant => {
+  const { ctx, id } = fixture(100n);
+  const log = variant === 'malformed' ? { ...receipt().logs[0], topics: [] }
+    : variant === 'wrong nonce' ? receipt(hash).logs[0]
+    : { ...receipt().logs[0], address: recipient };
+  recoveryRpc({ logs: [log] });
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(ctx.ledger.get(id)).toMatchObject({ scan_next_block: '100', status: 'uncertain', tx_hash: null });
+});
+
+it.each(['', null, {}])('rejects a non-array RPC result %j without advancing', async raw => {
+  const { ctx, id } = fixture(100n);
+  recoveryRpc({ raw });
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(ctx.ledger.get(id)?.scan_next_block).toBe('100');
+});
+
+it('leaves legacy attempts without an anchor held instead of guessing a search range', async () => {
+  const { ctx, id, db } = fixture();
+  db.raw.prepare('UPDATE payment_attempts SET tx_hash=NULL').run();
+  const requests = recoveryRpc();
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(0);
+  expect(requests).toHaveLength(0);
+  expect(ctx.ledger.get(id)?.status).toBe('uncertain');
+});
 
 function receipt(authorizationNonce = nonce, amount = 370000n) {
   const logs = [
@@ -42,8 +122,37 @@ function typedReceipt(): TransactionReceipt {
 function rpcReply(body: string, value = receipt(), head = '0x65') {
   const request = JSON.parse(body);
   return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id,
-    result: request.method === 'eth_getTransactionReceipt' ? value : head }));
+    result: request.method === 'eth_getTransactionReceipt' ? value
+      : request.method === 'eth_getBlockByNumber' ? { number: '0x64', hash, transactions: [] } : head }));
 }
+
+it('recovers a lost HTTP response automatically from its authorization nonce without another signature', async () => {
+  const db = createTestDb(); handles.push(db);
+  const ctx = paymentContext(createTestConfig({ paymentLimits: { totalCents: 100, dailyCents: 100, maxSingleCents: 100 } }), db.raw, 'x402_fetch');
+  let signedNonce = nonce;
+  const signer = { address: payer, signTypedData: vi.fn(async args => { signedNonce = args.message.nonce; return '0xsignature'; }) } as any;
+  const requests: any[] = [];
+  const network = vi.fn((url, init) => {
+    if (String(url).includes('api.conway.tech')) {
+      if (new Headers(init.headers).has('X-Payment')) throw new Error('response lost after debit');
+      return new Response(JSON.stringify({ x402Version: 1, accepts: [{ scheme: 'exact', network: 'base', maxAmountRequired: '370000', payTo: recipient, asset }] }), { status: 402 });
+    }
+    const request = JSON.parse(init.body); requests.push(request);
+    const result = request.method === 'eth_getBlockByNumber' ? { number: '0x64', hash, transactions: [] }
+      : request.method === 'eth_getLogs' ? [receipt(signedNonce).logs[0]]
+      : request.method === 'eth_getTransactionReceipt' ? receipt(signedNonce) : '0x65';
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+  });
+  vi.stubGlobal('fetch', network);
+  const first = await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx);
+  expect(first.paymentStatus).toBe('uncertain');
+  expect(await reconcilePendingPayments(ctx.ledger)).toBe(1);
+  expect(ctx.ledger.get(first.attemptId!)?.status).toBe('confirmed');
+  expect(ctx.ledger.get(first.attemptId!)?.fulfilled).toBe(0);
+  expect(requests.find(r => r.method === 'eth_getLogs').params[0]).toMatchObject({ address: asset, fromBlock: '0x64', toBlock: '0x64' });
+  await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx);
+  expect(signer.signTypedData).toHaveBeenCalledTimes(1);
+});
 
 it('requires the precise token, payer, recipient, amount, authorization nonce and successful receipt', () => {
   const { ctx, id } = fixture();

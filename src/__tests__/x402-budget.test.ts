@@ -18,6 +18,15 @@ function fixture() {
   const signer = { address: payer, signTypedData: vi.fn().mockResolvedValue('0xsignature') } as any;
   return { db, ctx, signer };
 }
+function stubFetch(service: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
+    if (String(url).includes('base.org')) {
+      const request = JSON.parse(String(init.body));
+      return reply({ jsonrpc: '2.0', id: request.id, result: { number: '0x64', transactions: [] } });
+    }
+    return service(url, init);
+  });
+}
 function quote(amount = '370000') {
   return reply({ x402Version: 1, accepts: [{ scheme: 'exact', network: 'base', maxAmountRequired: amount, asset, payTo: recipient, maxTimeoutSeconds: 60 }] }, 402);
 }
@@ -28,13 +37,13 @@ it('uses atomic units for small v1 amounts, never guessed dollars', () => {
 });
 it('will not sign without an explicit durable budget', async () => {
   const { signer } = fixture();
-  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => quote()));
+  stubFetch(vi.fn().mockImplementation(() => quote()));
   expect((await x402Fetch('https://api.conway.tech/data', signer)).success).toBe(false);
   expect(signer.signTypedData).not.toHaveBeenCalled();
 });
 it('blocks a topup quote exceeding the requested amount before signing', async () => {
   const { signer, ctx } = fixture();
-  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => quote('6000000')));
+  stubFetch(vi.fn().mockImplementation(() => quote('6000000')));
   const result = await topupCredits('https://api.conway.tech', signer, 5, undefined, ctx);
   expect(result.success).toBe(false);
   expect(signer.signTypedData).not.toHaveBeenCalled();
@@ -42,7 +51,7 @@ it('blocks a topup quote exceeding the requested amount before signing', async (
 it('retains an uncertain payment and prevents a new signature on retry', async () => {
   const { signer, ctx, db } = fixture();
   const fetch = vi.fn().mockImplementationOnce(() => quote()).mockRejectedValueOnce(new Error('connection lost')).mockImplementation(() => quote());
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   const first = await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx);
   expect(first.paymentStatus).toBe('uncertain');
   expect(db.raw.prepare('SELECT status FROM payment_attempts').get()).toEqual({ status: 'uncertain' });
@@ -52,21 +61,21 @@ it('retains an uncertain payment and prevents a new signature on retry', async (
 });
 it('does not treat HTTP success as a confirmed payment or invent credits', async () => {
   const { signer, ctx } = fixture();
-  vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => quote('5000000')).mockResolvedValueOnce(reply({})));
+  stubFetch(vi.fn().mockImplementationOnce(() => quote('5000000')).mockResolvedValueOnce(reply({})));
   const result = await topupCredits('https://api.conway.tech', signer, 5, undefined, ctx);
   expect(result.success).toBe(false);
   expect(result.creditsCentsAdded).toBeUndefined();
 });
 it('releases a failed signature before any paid request', async () => {
   const { signer, ctx, db } = fixture(); signer.signTypedData.mockRejectedValue(new Error('signer offline'));
-  const fetch = vi.fn().mockImplementation(() => quote()); vi.stubGlobal('fetch', fetch);
+  const fetch = vi.fn().mockImplementation(() => quote()); stubFetch(fetch);
   await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx);
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(db.raw.prepare('SELECT status FROM payment_attempts').get()).toEqual({ status: 'released' });
 });
 it('records no payment for a free response', async () => {
   const { signer, ctx, db } = fixture();
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply({ free: true })));
+  stubFetch(vi.fn().mockResolvedValue(reply({ free: true })));
   expect((await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx)).success).toBe(true);
   expect(db.raw.prepare('SELECT * FROM payment_attempts').all()).toEqual([]);
   expect(signer.signTypedData).not.toHaveBeenCalled();
@@ -74,7 +83,7 @@ it('records no payment for a free response', async () => {
 
 it('shares the topup hold with generic fetch and ignores URL fragments', async () => {
   const { signer, ctx } = fixture();
-  vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => quote('5000000')).mockRejectedValueOnce(new Error('lost')).mockImplementation(() => quote('5000000')));
+  stubFetch(vi.fn().mockImplementationOnce(() => quote('5000000')).mockRejectedValueOnce(new Error('lost')).mockImplementation(() => quote('5000000')));
   await topupCredits('https://api.conway.tech', signer, 5, undefined, ctx);
   await x402Fetch(`https://api.conway.tech/pay/5/${payer}#retry`, signer, 'GET', undefined, undefined, 500, undefined, ctx);
   await x402Fetch(`https://api.conway.tech/pay/5/${payer}`, signer, 'GET', undefined, undefined, 500, undefined, { ...ctx, purchaseId: 'different' });
@@ -83,28 +92,28 @@ it('shares the topup hold with generic fetch and ignores URL fragments', async (
 
 it.each(['permit2', 'erc7710', 'unknown'])('rejects unsupported transfer method %s before signing', async assetTransferMethod => {
   const { signer, ctx } = fixture();
-  vi.stubGlobal('fetch', vi.fn(() => reply({ x402Version: 2, accepts: [{ scheme: 'exact', network: 'eip155:8453', amount: '370000', payTo: recipient, asset, extra: { assetTransferMethod } }] }, 402)));
+  stubFetch(vi.fn(() => reply({ x402Version: 2, accepts: [{ scheme: 'exact', network: 'eip155:8453', amount: '370000', payTo: recipient, asset, extra: { assetTransferMethod } }] }, 402)));
   await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx);
   expect(signer.signTypedData).not.toHaveBeenCalled();
 });
 
 it('signs the correct USDC domain on Base Sepolia', async () => {
   const { signer, ctx } = fixture();
-  vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => reply({ x402Version: 2, accepts: [{ scheme: 'exact', network: 'eip155:84532', amount: '370000', payTo: recipient, asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', extra: { name: 'USDC', version: '2' } }] }, 402)).mockResolvedValueOnce(reply({})));
+  stubFetch(vi.fn().mockImplementationOnce(() => reply({ x402Version: 2, accepts: [{ scheme: 'exact', network: 'eip155:84532', amount: '370000', payTo: recipient, asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', extra: { name: 'USDC', version: '2' } }] }, 402)).mockResolvedValueOnce(reply({})));
   await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx);
   expect(signer.signTypedData.mock.calls[0][0].domain).toMatchObject({ name: 'USDC', version: '2', chainId: 84532 });
 });
 
 it.each(['http://api.conway.tech/data', 'https://evil.example/data'])('does not pay an unauthorized destination %s', async url => {
   const { signer, ctx } = fixture();
-  vi.stubGlobal('fetch', vi.fn(() => quote()));
+  stubFetch(vi.fn(() => quote()));
   await x402Fetch(url, signer, 'GET', undefined, undefined, 100, undefined, ctx);
   expect(signer.signTypedData).not.toHaveBeenCalled();
 });
 
 it.each(['escrow', 'upfront'])('does not sign unsupported payment flow %s', async paymentFlow => {
   const { signer, ctx } = fixture();
-  vi.stubGlobal('fetch', vi.fn(() => reply({ x402Version: 2, accepts: [{ scheme: 'exact', network: 'eip155:8453', amount: '370000', payTo: recipient, asset, extra: { paymentFlow } }] }, 402)));
+  stubFetch(vi.fn(() => reply({ x402Version: 2, accepts: [{ scheme: 'exact', network: 'eip155:8453', amount: '370000', payTo: recipient, asset, extra: { paymentFlow } }] }, 402)));
   await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx);
   expect(signer.signTypedData).not.toHaveBeenCalled();
 });
@@ -112,7 +121,19 @@ it.each(['escrow', 'upfront'])('does not sign unsupported payment flow %s', asyn
 it('enforces zero in standalone even if paid limits were configured', async () => {
   const { signer, db } = fixture();
   const ctx = paymentContext(createTestConfig({ standalone: true, paymentLimits: { totalCents: 1000, dailyCents: 1000, maxSingleCents: 1000 } }), db.raw, 'x402_fetch');
-  vi.stubGlobal('fetch', vi.fn(() => quote()));
+  stubFetch(vi.fn(() => quote()));
   expect((await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx)).success).toBe(false);
   expect(signer.signTypedData).not.toHaveBeenCalled();
+});
+
+it('does not sign or hold funds when a recovery anchor cannot be obtained', async () => {
+  const { signer, ctx, db } = fixture();
+  vi.stubGlobal('fetch', vi.fn((url) => {
+    if (String(url).includes('base.org')) throw new Error('RPC offline');
+    return quote();
+  }));
+  const result = await x402Fetch('https://api.conway.tech/data', signer, 'GET', undefined, undefined, 100, undefined, ctx);
+  expect(result).toMatchObject({ success: false, paymentStatus: 'blocked' });
+  expect(signer.signTypedData).not.toHaveBeenCalled();
+  expect(db.raw.prepare('SELECT status FROM payment_attempts').get()).toEqual({ status: 'released' });
 });

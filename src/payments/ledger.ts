@@ -26,6 +26,7 @@ export interface PaymentAttempt {
   nonce: string | null; tx_hash: string | null; fulfilled: number;
   purchase_id: string; response_json: string | null; response_status: number | null;
   request_fingerprint: string;
+  scan_start_block: string | null; scan_next_block: string | null;
 }
 
 export class PaymentLedger {
@@ -73,6 +74,18 @@ export class PaymentLedger {
     const result = this.db.prepare("UPDATE payment_attempts SET status='submitted', nonce=? WHERE id=? AND status='reserved'").run(nonce, id);
     if (!result.changes) throw new Error('Invalid payment state before submission');
   }
+  anchor(id: string, block: bigint): void {
+    if (block < 0n) throw new Error('Invalid recovery block');
+    const result = this.db.prepare(`UPDATE payment_attempts SET scan_start_block=?, scan_next_block=?
+      WHERE id=? AND status='reserved' AND scan_start_block IS NULL`).run(block.toString(), block.toString(), id);
+    if (!result.changes) throw new Error('Cannot anchor this payment state');
+  }
+  advanceScan(id: string, from: bigint, next: bigint): void {
+    if (next <= from) throw new Error('Invalid recovery cursor');
+    // A stale concurrent scan must not move another worker's cursor backwards.
+    this.db.prepare(`UPDATE payment_attempts SET scan_next_block=? WHERE id=? AND scan_next_block=?
+      AND status IN ('submitted','uncertain') AND tx_hash IS NULL`).run(next.toString(), id, from.toString());
+  }
   release(id: string): void {
     const result = this.db.prepare("UPDATE payment_attempts SET status='released' WHERE id=? AND status='reserved'").run(id);
     if (!result.changes) throw new Error('Cannot release a submitted payment state');
@@ -84,7 +97,9 @@ export class PaymentLedger {
     this.db.prepare('UPDATE payment_attempts SET fulfilled=1 WHERE id=?').run(id);
   }
   pending(): PaymentAttempt[] {
-    return this.db.prepare("SELECT * FROM payment_attempts WHERE status IN ('submitted','uncertain') AND tx_hash IS NOT NULL ORDER BY COALESCE(checked_at,'') LIMIT 10").all() as PaymentAttempt[];
+    return this.db.prepare(`SELECT * FROM payment_attempts WHERE status IN ('submitted','uncertain')
+      AND (tx_hash IS NOT NULL OR (nonce IS NOT NULL AND scan_next_block IS NOT NULL))
+      ORDER BY COALESCE(checked_at,'') LIMIT 10`).all() as PaymentAttempt[];
   }
   checked(id: string): void {
     this.db.prepare('UPDATE payment_attempts SET checked_at=? WHERE id=?').run(new Date().toISOString(), id);
@@ -94,7 +109,8 @@ export class PaymentLedger {
   }
   recent(): unknown[] {
     return this.db.prepare(`SELECT id, purchase_id, domain, kind, amount_atomic, reserved_cents, status, nonce,
-      tx_hash, fulfilled, response_status, created_at FROM payment_attempts ORDER BY created_at DESC LIMIT 20`).all();
+      tx_hash, fulfilled, response_status, created_at, scan_start_block, scan_next_block
+      FROM payment_attempts ORDER BY created_at DESC LIMIT 20`).all();
   }
   confirm(id: string, hash: string): void {
     this.db.transaction(() => {

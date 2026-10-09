@@ -255,7 +255,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       execute: async (_args, ctx) => {
         const payment = paymentContext(ctx.config, ctx.db.raw);
         return JSON.stringify({ limits: payment.limits, attempts: payment.ledger.summary(), recent: payment.ledger.recent(),
-          recovery: 'Unknown transaction hashes stay held. Find the hash from provider or chain evidence, then use reconcile_payment. Reuse purchase_id on retries; a new ID means a new purchase only after the previous payment is resolved.' });
+          recovery: 'Unknown hashes with scan_start_block are searched automatically in finalized history, 2000 blocks per pass. Holds remain until verified. Legacy attempts without an anchor need a hash from provider or chain evidence for reconcile_payment. Reuse purchase_id on retries; a new ID means a new purchase only after the previous payment is resolved.' });
       },
     },
     {

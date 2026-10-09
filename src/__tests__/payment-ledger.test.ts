@@ -74,13 +74,13 @@ it('rounds reservations up while recording exact fractional cents', () => {
 it('migrates an existing v11 database without losing state', () => {
   const { db, file } = open();
   db.prepare("INSERT INTO kv (key,value) VALUES ('keep','existing')").run();
-  db.exec('DROP TABLE payment_attempts; DELETE FROM schema_version WHERE version=12');
+  db.exec('DROP TABLE payment_attempts; DELETE FROM schema_version WHERE version>=12');
   db.close(); handles.splice(handles.indexOf(db), 1);
   const upgraded = createDatabase(file); handles.push(upgraded.raw);
   expect(upgraded.getKV('keep')).toBe('existing');
   const ledger = new PaymentLedger(upgraded.raw);
   expect(ledger.get(ledger.reserve(quote, limits))?.status).toBe('reserved');
-  expect(upgraded.raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 12 });
+  expect(upgraded.raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 13 });
 });
 
 it('restores paid content after restart without authorizing another identical purchase', () => {
@@ -95,4 +95,28 @@ it('restores paid content after restart without authorizing another identical pu
   expect(next.completed('op')).toMatchObject({ id, response_json: '{"result":"paid content"}', response_status: 200 });
   expect(() => next.reserve(quote, limits)).toThrow(/unresolved/i);
   expect(next.reserve({ ...quote, purchaseId: 'deliberate-next-purchase' }, limits)).toBeTruthy();
+});
+
+it('migrates v12 pending attempts without losing reservations', () => {
+  const { db, file, ledger } = open();
+  const id = ledger.reserve(quote, limits);
+  ledger.submitted(id, 'nonce'); ledger.uncertain(id);
+  db.exec('ALTER TABLE payment_attempts DROP COLUMN scan_start_block; ALTER TABLE payment_attempts DROP COLUMN scan_next_block; DELETE FROM schema_version WHERE version=13');
+  db.close(); handles.splice(handles.indexOf(db), 1);
+  const restored = createDatabase(file); handles.push(restored.raw);
+  expect(new PaymentLedger(restored.raw).get(id)).toMatchObject({ status: 'uncertain', reserved_cents: 37, scan_start_block: null, scan_next_block: null });
+  expect(restored.raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 13 });
+});
+
+it('persists scan progress and rejects stale concurrent cursor updates after restart', () => {
+  const { db, file, ledger } = open();
+  const id = ledger.reserve(quote, limits);
+  ledger.anchor(id, 100n); ledger.submitted(id, 'nonce');
+  ledger.advanceScan(id, 100n, 2100n);
+  db.close(); handles.splice(handles.indexOf(db), 1);
+  const restored = createDatabase(file); handles.push(restored.raw);
+  const next = new PaymentLedger(restored.raw);
+  expect(next.get(id)).toMatchObject({ scan_start_block: '100', scan_next_block: '2100' });
+  next.advanceScan(id, 100n, 200n);
+  expect(next.get(id)?.scan_next_block).toBe('2100');
 });

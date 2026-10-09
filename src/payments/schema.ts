@@ -24,3 +24,8 @@ CREATE TABLE IF NOT EXISTS payment_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_payment_operation ON payment_attempts(operation_key, status);
 `;
+
+export const PAYMENT_RECOVERY_MIGRATION = `
+ALTER TABLE payment_attempts ADD COLUMN scan_start_block TEXT;
+ALTER TABLE payment_attempts ADD COLUMN scan_next_block TEXT;
+`;

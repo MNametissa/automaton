@@ -71,7 +71,7 @@ import type {
   MetricSnapshotRow,
 } from "../types.js";
 import { ulid } from "ulid";
-import { PAYMENT_SCHEMA } from '../payments/schema.js';
+import { PAYMENT_SCHEMA, PAYMENT_RECOVERY_MIGRATION } from '../payments/schema.js';
 import { createLogger } from "../observability/logger.js";
 
 const logger = createLogger("database");
@@ -629,6 +629,7 @@ function applyMigrations(db: DatabaseType): void {
   ];
 
   migrations.push({ version: 12, apply: () => db.exec(PAYMENT_SCHEMA) });
+  migrations.push({ version: 13, apply: () => db.exec(PAYMENT_RECOVERY_MIGRATION) });
   for (const m of migrations) {
     if (currentVersion < m.version) {
       const migrate = db.transaction(() => {

@@ -13,7 +13,7 @@ import {
 } from "viem";
 import { createHash } from 'node:crypto';
 import type { PaymentContext } from '../payments/context.js';
-import { reconcilePayment } from '../payments/settlement.js';
+import { anchorPayment, reconcilePayment } from '../payments/settlement.js';
 import { ResilientHttpClient } from "./http-client.js";
 import type { ChainType } from "../identity/chain.js";
 
@@ -213,6 +213,7 @@ export async function x402Fetch(
     attemptId = context.ledger.reserve({ operationKey, payer: account.address, recipient: parsed.requirement.payToAddress,
       asset: parsed.requirement.usdcAddress, network: parsed.requirement.network, amountAtomic,
       domain: target.hostname, kind: context.kind, purchaseId: context.purchaseId, requestFingerprint }, context.limits);
+    await anchorPayment(context.ledger, attemptId);
     const payment = await signPayment(account, parsed.requirement, parsed.x402Version);
     context.ledger.submitted(attemptId, payment.payload.authorization.nonce);
     submitted = true;
