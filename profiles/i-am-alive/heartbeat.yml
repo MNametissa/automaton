@@ -1,0 +1,13 @@
+# Proposed native heartbeat configuration. Copy into the dedicated state on activation.
+defaultIntervalMs: 60000
+lowComputeMultiplier: 4
+entries:
+  - { name: check_work, task: check_work, schedule: "* * * * *", enabled: true }
+  - { name: report_metrics, task: report_metrics, schedule: "*/5 * * * *", enabled: true }
+  - { name: heartbeat_ping, task: heartbeat_ping, schedule: "*/15 * * * *", enabled: true }
+  - { name: check_credits, task: check_credits, schedule: "*/5 * * * *", enabled: true }
+  - { name: health_check, task: health_check, schedule: "*/5 * * * *", enabled: true }
+  - { name: check_usdc_balance, task: check_usdc_balance, schedule: "*/5 * * * *", enabled: false }
+  - { name: check_for_updates, task: check_for_updates, schedule: "0 */4 * * *", enabled: false }
+  - { name: reconcile_payments, task: reconcile_payments, schedule: "*/5 * * * *", enabled: false }
+  - { name: check_social_inbox, task: check_social_inbox, schedule: "*/2 * * * *", enabled: true }

@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import { ulid } from "ulid";
+import { LocalWorkerCapacityError } from "./local-worker.js";
 import { requireGoalVerification, goalRequiresVerification, unverifiedTasks, verifyGoal } from '../verification/tasks.js';
 import type { AutomatonIdentity } from "../types.js";
 import { createLogger } from "../observability/logger.js";
@@ -198,6 +199,13 @@ export class Orchestrator {
 
   async matchTaskToAgent(task: TaskNode): Promise<AgentAssignment> {
     const requestedRole = task.agentRole?.trim() || "generalist";
+
+    // Standalone work must never reuse remote children left in the database.
+    if (this.params.config.standalone) {
+      const spawned = await this.trySpawnAgent(task);
+      if (spawned) return spawned;
+      throw new Error(`No available agent for task ${task.id}`);
+    }
 
     // Local workers execute one task and exit; assigning another task requires spawn.
     const idleAgents = this.params.agentTracker.getIdle().filter(agent => !agent.address.startsWith('local://'));
@@ -413,7 +421,7 @@ export class Orchestrator {
           usdcBalance: Number(this.params.config?.usdcBalance ?? 0),
           idleAgents: this.params.agentTracker.getIdle().length,
           busyAgents: Math.max(0, this.getActiveAgentCount() - this.params.agentTracker.getIdle().length),
-          maxAgents: Number(this.params.config?.maxChildren ?? 3),
+          maxAgents: Number(this.params.config?.standalone ? (this.params.config.maxLocalWorkers ?? 4) : (this.params.config?.maxChildren ?? 3)),
         }),
         this.params.inference,
       );
@@ -537,7 +545,8 @@ export class Orchestrator {
     // leave tasks stuck in 'assigned' forever. Detect and reset them.
     if (this.params.isWorkerAlive) {
       const assignedTasks = getTasksByGoal(this.params.db, goal.id)
-        .filter((t) => t.status === "assigned" && t.assignedTo);
+        .filter((t) => (t.status === "assigned" || t.status === "running")
+          && t.assignedTo && t.assignedTo !== this.params.identity.address);
       for (const task of assignedTasks) {
         const alive = this.params.isWorkerAlive(task.assignedTo!);
         if (!alive) {
@@ -548,6 +557,9 @@ export class Orchestrator {
           this.params.db.prepare(
             "UPDATE task_graph SET status = 'pending', assigned_to = NULL, started_at = NULL WHERE id = ?",
           ).run(task.id);
+          if (task.assignedTo!.startsWith("local://")) {
+            this.params.agentTracker.updateStatus(task.assignedTo!, "cleaned_up");
+          }
         }
       }
     }
@@ -558,7 +570,14 @@ export class Orchestrator {
     for (const task of ready) {
       try {
         const assignment = await this.matchTaskToAgent(task);
-        assignTask(this.params.db, task.id, assignment.agentAddress);
+        // LocalWorkerPool claims before execution. Other spawn adapters still
+        // return unclaimed tasks and are assigned here.
+        const current = getTaskById(this.params.db, task.id);
+        if (current?.status === "pending") {
+          assignTask(this.params.db, task.id, assignment.agentAddress);
+        } else if (!assignment.agentAddress.startsWith("local://") || current?.assignedTo !== assignment.agentAddress) {
+          throw new Error(`Task ${task.id} was already claimed by another agent`);
+        }
 
         const isLocalWorker = assignment.agentAddress.startsWith("local://");
         const isSelfAssigned = assignment.agentAddress === this.params.identity?.address;
@@ -596,7 +615,7 @@ export class Orchestrator {
 
         // If no agent is available, skip this task — it stays pending and will
         // be retried on the next tick when an agent becomes available or is spawned.
-        if (err.message.startsWith("No available agent")) {
+        if (error instanceof LocalWorkerCapacityError || err.message.startsWith("No available agent")) {
           logger.warn("No agent available for task, will retry next tick", {
             taskId: task.id,
             role: task.agentRole,
@@ -717,7 +736,7 @@ export class Orchestrator {
           usdcBalance: Number(this.params.config?.usdcBalance ?? 0),
           idleAgents: this.params.agentTracker.getIdle().length,
           busyAgents: Math.max(0, this.getActiveAgentCount() - this.params.agentTracker.getIdle().length),
-          maxAgents: Number(this.params.config?.maxChildren ?? 3),
+          maxAgents: Number(this.params.config?.standalone ? (this.params.config.maxLocalWorkers ?? 4) : (this.params.config?.maxChildren ?? 3)),
         }),
         this.params.inference,
       );

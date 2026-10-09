@@ -20,7 +20,9 @@
     "reusePersonalWallet": false,
     "initialMode": "standalone-capability-evaluation",
     "productionModeReady": false,
-    "replicationEnabled": false
+    "replicationEnabled": false,
+    "maxLocalWorkers": 4,
+    "workerPlacement": "same-process, same-pod in standalone mode"
   },
   "inference": {
     "selectedModel": null,
@@ -59,7 +61,10 @@
     "ownedPodIds": [],
     "networkVolumeId": null,
     "provisioningEnabled": false,
-    "persistentSupervisorImplemented": false,
+    "persistentSupervisorImplemented": true,
+    "persistentSupervisorDeployed": false,
+    "supervisor": "Supervisor 4.3.0; conway-local/supervision.mjs prepares native configuration",
+    "stoppedPodRecoveryImplemented": false,
     "externalBudgetControllerImplemented": false
   },
   "github": {
@@ -83,6 +88,9 @@
     "decisionJournalEnforced": false,
     "nativeReportMetricsScheduleProposed": "*/5 * * * *",
     "nativeReportMetricsScheduleApplied": false,
+    "heartbeatProfile": "heartbeat.yml",
+    "checkWorkImplemented": true,
+    "checkWorkScheduleApplied": false,
     "dashboardImplemented": false,
     "pollingServiceInstalled": false
   },

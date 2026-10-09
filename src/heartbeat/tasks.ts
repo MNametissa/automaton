@@ -1,4 +1,5 @@
 import { paymentContext } from '../payments/context.js';
+import { checkWork } from './work.js';
 /**
  * Built-in Heartbeat Tasks
  *
@@ -45,6 +46,7 @@ export const COLONY_TASK_INTERVALS_MS = {
 } as const;
 
 export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
+  check_work: checkWork,
   reconcile_payments: async (_ctx, taskCtx) => {
     if (taskCtx.config.standalone) return { shouldWake: false };
     const { reconcilePendingPayments } = await import('../payments/settlement.js');

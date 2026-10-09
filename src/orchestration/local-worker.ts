@@ -11,7 +11,7 @@ import { createLogger } from "../observability/logger.js";
 import type { HarnessContext, WorkerInferenceClient } from "../agent/harness-types.js";
 import { buildWisdomFromGoal, createBudgetFromTask } from "../agent/harness-types.js";
 import { HarnessRegistry } from "../agent/harness-registry.js";
-import { completeTask, failTask } from "./task-graph.js";
+import { assignTask, completeTask, failTask } from "./task-graph.js";
 import type { TaskNode } from "./task-graph.js";
 import { AgentWorkspace } from "./workspace.js";
 import type {
@@ -45,18 +45,66 @@ interface LocalWorkerConfig {
   inputSource?: InputSource;
 }
 
+export class LocalWorkerCapacityError extends Error {
+  constructor() { super("Local worker capacity is full; retry on the next tick"); }
+}
+
+// A runtime keeps its database open across wake cycles. Never share workers
+// between database connections or agent identities.
+const runtimePools = new WeakMap<Database, Map<string, LocalWorkerPool>>();
+
+export function getLocalWorkerPool(config: LocalWorkerConfig): LocalWorkerPool {
+  let pools = runtimePools.get(config.db);
+  if (!pools) {
+    pools = new Map();
+    runtimePools.set(config.db, pools);
+  }
+  const key = config.identity.address;
+  let pool = pools.get(key);
+  if (!pool) {
+    pool = new LocalWorkerPool(config);
+    pools.set(key, pool);
+  } else {
+    pool.configure(config);
+  }
+  return pool;
+}
+
+export async function shutdownLocalWorkers(db: Database, address: string): Promise<void> {
+  const pools = runtimePools.get(db);
+  const pool = pools?.get(address);
+  if (pool) await pool.shutdown();
+}
+
 export class LocalWorkerPool {
   private activeWorkers = new Map<string, { promise: Promise<void>; abortController: AbortController }>();
 
-  constructor(private readonly config: LocalWorkerConfig) {}
+  private stopping = false;
+
+  constructor(private config: LocalWorkerConfig) {}
+
+  configure(config: LocalWorkerConfig): void {
+    this.config = config;
+  }
 
   spawn(task: TaskNode): { address: string; name: string; sandboxId: string } {
+    const limit = this.config.config.maxLocalWorkers ?? 4;
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new Error("maxLocalWorkers must be a positive integer");
+    }
+    if (this.stopping || this.activeWorkers.size >= limit) throw new LocalWorkerCapacityError();
+
     const workerId = `local-worker-${ulid()}`;
     const workerName = `worker-${task.agentRole ?? "generalist"}-${workerId.slice(-6)}`;
     const address = `local://${workerId}`;
     const abortController = new AbortController();
 
-    const workerPromise = this.runWorker(workerId, task, abortController.signal)
+    // Claim synchronously before any harness work or another spawn can run.
+    assignTask(this.config.db, task.id, address);
+    const workerConfig = this.config;
+    // Let the orchestrator register the child before a fast harness can finish.
+    const workerPromise = new Promise<void>(resolve => setImmediate(resolve))
+      .then(() => this.runWorker(workerId, task, abortController.signal, workerConfig))
       .catch((error) => {
         logger.error("Local worker crashed", error instanceof Error ? error : new Error(String(error)), {
           workerId,
@@ -92,6 +140,7 @@ export class LocalWorkerPool {
   }
 
   async shutdown(): Promise<void> {
+    this.stopping = true;
     for (const [, worker] of this.activeWorkers) {
       worker.abortController.abort();
     }
@@ -99,42 +148,50 @@ export class LocalWorkerPool {
     this.activeWorkers.clear();
   }
 
-  private async runWorker(workerId: string, task: TaskNode, signal: AbortSignal): Promise<void> {
-    const harness = this.config.harnessRegistry.createForRole(task.agentRole);
+  private async runWorker(workerId: string, task: TaskNode, signal: AbortSignal, config = this.config): Promise<void> {
+    const requeueInterruptedTask = () => {
+      config.db.prepare("UPDATE task_graph SET status = 'pending', assigned_to = NULL, started_at = NULL WHERE id = ? AND assigned_to = ? AND status IN ('assigned', 'running')")
+        .run(task.id, `local://${workerId}`);
+    };
+    if (signal.aborted) {
+      requeueInterruptedTask();
+      return;
+    }
+    const harness = config.harnessRegistry.createForRole(task.agentRole);
     const workspace = new AgentWorkspace(task.goalId);
-    const allowedEditRoot = path.resolve(this.config.allowedEditRoot ?? DEFAULT_ALLOWED_EDIT_ROOT);
-    const workerIdentity = createWorkerIdentity(this.config.identity, workerId, task.agentRole);
+    const allowedEditRoot = path.resolve(config.allowedEditRoot ?? DEFAULT_ALLOWED_EDIT_ROOT);
+    const workerIdentity = createWorkerIdentity(config.identity, workerId, task.agentRole);
     const context: HarnessContext = {
       workspaceRoot: workspace.basePath,
       allowedEditRoot,
       workspace,
       identity: workerIdentity,
-      config: this.config.config,
-      db: this.config.db,
-      conway: this.config.conway,
+      config: config.config,
+      db: config.db,
+      conway: config.conway,
       inference: {
-        chat: async (params) => this.config.inference.chat(params),
+        chat: async (params) => config.inference.chat(params),
       },
       budget: createBudgetFromTask(task),
-      wisdom: buildWisdomFromGoal(this.config.db, task.goalId, workspace),
+      wisdom: buildWisdomFromGoal(config.db, task.goalId, workspace),
       abortSignal: signal,
       goalId: task.goalId,
-      toolCatalog: this.config.tools,
-      toolContext: this.config.toolContext
+      toolCatalog: config.tools,
+      toolContext: config.toolContext
         ? {
-            ...this.config.toolContext,
+            ...config.toolContext,
             identity: workerIdentity,
           }
         : undefined,
-      policyEngine: this.config.policyEngine,
-      spendTracker: this.config.spendTracker,
-      inputSource: this.config.inputSource,
+      policyEngine: config.policyEngine,
+      spendTracker: config.spendTracker,
+      inputSource: config.inputSource,
     };
 
-    if (this.config.maxTurns) {
-      context.budget.maxTurns = this.config.maxTurns;
+    if (config.maxTurns) {
+      context.budget.maxTurns = config.maxTurns;
     }
-    if (harness.id === "orchestrator" && !this.config.maxTurns) {
+    if (harness.id === "orchestrator" && !config.maxTurns) {
       context.budget.maxTurns = Math.max(context.budget.maxTurns, 50);
     }
 
@@ -144,10 +201,14 @@ export class LocalWorkerPool {
 
     try {
       await harness.initialize(task, context);
+      if (signal.aborted) {
+        requeueInterruptedTask();
+        return;
+      }
       const result = await harness.execute();
 
       if (result.success) {
-        completeTask(this.config.db, task.id, result);
+        completeTask(config.db, task.id, result);
         logger.info("Local worker completed task", {
           workerId,
           taskId: task.id,
@@ -155,8 +216,10 @@ export class LocalWorkerPool {
           duration: result.duration,
           harness: harness.id,
         });
+      } else if (signal.aborted) {
+        requeueInterruptedTask();
       } else {
-        failTask(this.config.db, task.id, result.output || "Task reported failure", true);
+        failTask(config.db, task.id, result.output || "Task reported failure", true);
         logger.warn("Local worker reported task failure", {
           workerId,
           taskId: task.id,
@@ -166,9 +229,13 @@ export class LocalWorkerPool {
         });
       }
     } catch (error) {
+      if (signal.aborted) {
+        requeueInterruptedTask();
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`[WORKER ${workerId}] Harness execution failed: ${message}`);
-      failTask(this.config.db, task.id, message, true);
+      failTask(config.db, task.id, message, true);
     }
   }
 }

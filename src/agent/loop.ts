@@ -63,7 +63,7 @@ import { Orchestrator } from "../orchestration/orchestrator.js";
 import { PlanModeController } from "../orchestration/plan-mode.js";
 import { generateTodoMd, injectTodoContext } from "../orchestration/attention.js";
 import { ColonyMessaging, LocalDBTransport } from "../orchestration/messaging.js";
-import { LocalWorkerPool } from "../orchestration/local-worker.js";
+import { LocalWorkerPool, getLocalWorkerPool, LocalWorkerCapacityError } from "../orchestration/local-worker.js";
 import { SimpleAgentTracker, SimpleFundingProtocol } from "../orchestration/simple-tracker.js";
 import { HarnessRegistry } from "./harness-registry.js";
 import { createWorkerInferenceBridge } from "./worker-inference-bridge.js";
@@ -211,7 +211,7 @@ export async function runAgentLoop(
 
       // Local worker pool: runs inference-driven agents in-process
       // as async tasks. Falls back from Conway sandbox spawning.
-      const initializedWorkerPool = new LocalWorkerPool({
+      const initializedWorkerPool = getLocalWorkerPool({
         db: db.raw,
         inference: workerInference,
         conway,
@@ -339,6 +339,7 @@ export async function runAgentLoop(
                 const spawned = initializedWorkerPool.spawn(task);
                 return spawned;
               } catch (localError) {
+                if (localError instanceof LocalWorkerCapacityError) throw localError;
                 logger.warn("Failed to spawn local worker", {
                   taskId: task.id,
                   error: localError instanceof Error ? localError.message : String(localError),

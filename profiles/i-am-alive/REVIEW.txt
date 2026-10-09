@@ -159,10 +159,61 @@ H. Démarrer l'exploitation validée avec suivi des premières commandes, coûts
 - La première mission commerciale a un acheteur/canal plausible et une limite
   d'expérimentation ; aucune rentabilité n'est affirmée avant observation.
 
-9. Validation de cette préparation
+9. Relance automatique et travailleurs locaux
 
-Typecheck et compilation du runtime/CLI réussis. Suite complète : 75 fichiers,
-1 750 tests réussis et un test opt-in ignoré. Dix tests du nouvel adaptateur
+Le pool de travailleurs reste désormais attaché à l'identité et à la connexion
+SQLite durant tous les cycles de réveil. Sa limite maxLocalWorkers vaut quatre
+par défaut, indépendamment de maxChildren. Les tâches excédentaires restent en
+attente. Le mode standalone ne réutilise aucun ancien enfant distant. Les workers
+partagent le processus et le pod ; ils n'exigent pas de nouvelles machines.
+
+Après un véritable redémarrage, les tâches assigned/running de workers disparus
+redeviennent disponibles, tandis que les tâches du parent restent attribuées.
+Une affectation est enregistrée avant d'exécuter le travail. L'arrêt coopératif
+annule les workers avant fermeture de SQLite, avec un délai maximal de cinq secondes.
+Une tâche rejouée doit rapprocher les effets externes déjà produits : ce mécanisme
+ne démontre pas une sémantique exactly-once sur des services externes.
+
+Le fichier heartbeat.yml fourni propose check_work toutes les minutes : réveiller
+pour planifier, exécuter des tâches prêtes, traiter les échecs ou vérifier la fin.
+Il évite les réveils sans allocation positive, pendant une exécution, sur audit
+bloqué, sans objectif actif ou en simple attente de dépendances. Les demandes sont
+dédupliquées et espacées d'au moins deux minutes. Ce fichier n'est pas encore copié
+dans un état actif. Il propose également report_metrics toutes les cinq minutes.
+
+Supervisor 4.3.0 est ajouté à l'image Docker pour relancer Node indépendamment du
+modèle. Préparation, après initialisation de l'état et du gateway au port 8787 :
+  node conway-local/supervision.mjs --state-dir /workspace/i-am-alive/state --work-dir /workspace/i-am-alive/work --control-dir /workspace/i-am-alive/control
+
+Le control.db utilisé lors du provisionnement doit déjà se trouver dans ce dossier
+control : le générateur vérifie localement que la clé du runtime y est reconnue.
+Le modèle local doit être accessible via UPSTREAM_URL ; son service est distinct.
+Le générateur écrit supervisord.conf en 0600 et n'exécute aucun processus.
+Le processus agent conserve la racine du code comme répertoire courant pour Git,
+l'automodification et les outils installés ; AUTOMATON_WORKSPACE désigne séparément
+les livrables. Le test du superviseur vérifie ces deux chemins distincts en réel.
+Ajouter --monitor pour démarrer également l'observateur Runpod lors de l'activation.
+Après activation autorisée, utiliser le chemin du fichier généré avec :
+  supervisord -n -c /workspace/i-am-alive/control/supervisord.conf
+  supervisorctl -c /workspace/i-am-alive/control/supervisord.conf status
+  supervisorctl -c /workspace/i-am-alive/control/supervisord.conf restart agent
+  supervisorctl -c /workspace/i-am-alive/control/supervisord.conf stop agent
+
+Les plantages relancent les processus. Cinq tentatives couvrent un démarrage qui
+échoue immédiatement, avec le backoff natif. Des plantages après démarrage réussi
+continuent de déclencher autorestart. Un stop reste effectif tant que ce superviseur
+reste en service ; son redémarrage réapplique autostart. Pour une pause durable du
+calcul, utiliser aussi la pause persistée du gateway. Arrêter le pod coupe tout.
+
+Ce dispositif exige que la machine et le superviseur fonctionnent. Un pod Runpod
+arrêté, détruit ou indisponible nécessite un contrôleur extérieur et les droits
+fournisseur adaptés. Aucun tel contrôleur n'est actif et aucun pod n'a été créé.
+Un processus vivant mais bloqué n'est pas détecté par autorestart seul.
+
+10. Validation actuelle
+
+Typecheck et compilation du runtime/CLI réussis. Suite complète : 77 fichiers,
+1 771 tests réussis et un test opt-in ignoré. Dix tests du nouvel adaptateur
 couvrent entre autres montants, erreurs, clés absentes, fichier privé, symlinks,
 absence de fuite dans les erreurs et nettoyage des noms de pods avant le modèle.
 Le test natif de contexte vérifie désormais la conservation de la mission entière.
@@ -170,8 +221,15 @@ Le test natif de contexte vérifie désormais la conservation de la mission enti
 La CLI compilée, sans clé, renvoie missing_credentials avec sortie 1 ; le mode
 watch termine proprement sur SIGTERM. Aucun test de cette intégration n'a utilisé
 une vraie clé Runpod. Les métriques fournisseur restent non observées en réel.
-Le test REA/Mimic opt-in ignoré par cette suite n'est pas une validation renouvelée
-des binaires tiers. Aucun nouveau conteneur ou déploiement n'a été construit ici.
+L'image locale a été reconstruite avec Supervisor. Son smoke test sans réseau,
+sans clés hôte et avec racine en lecture seule passe 16 tests puis sept scénarios
+de compatibilité. Il comprend les vrais outils REA/Mimic et le superviseur sur des
+fixtures locales ; aucune inférence de modèle réel ni aucune vente n'a été testée.
+Image testée : sha256:a07a7467d2d9ea80b25576f8eef470afdea6daf73bc135e99013dc3427a37bb1.
+Onze régressions couvrent le cycle des workers et dix le réveil pour travail.
+Le test de conservation du contexte discover_agents a été rendu indépendant du
+RPC public : il vérifie la boucle, pas la disponibilité d'un service de découverte.
+Aucun déploiement distant effectué.
 
 La commande cm close ne prend pas en charge ce projet CLI TypeScript sans cible
 Next.js/Odoo : sortie d'usage 2, pas une porte de validation réussie. La vérification
@@ -184,3 +242,5 @@ https://docs.runpod.io/sdks/graphql/manage-pods
 https://graphql-spec.runpod.io/
 https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys
 https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps
+https://supervisord.org/configuration.html
+https://supervisord.org/subprocess.html

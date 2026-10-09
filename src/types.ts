@@ -66,6 +66,8 @@ export interface AutomatonConfig {
   skillsDir: string;
   agentId?: string;
   maxChildren: number;
+  /** Maximum concurrent in-process workers, independent of remote replication. */
+  maxLocalWorkers?: number;
   maxTurnsPerCycle?: number;
   /** Child sandbox memory config (MB), default 1024 */
   childSandboxMemoryMb?: number;
@@ -91,6 +93,7 @@ export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
   version: "0.2.1",
   skillsDir: "~/.automaton/skills",
   maxChildren: 3,
+  maxLocalWorkers: 4,
   maxTurnsPerCycle: 25,
   childSandboxMemoryMb: 1024,
   socialRelayUrl: "https://social.conway.tech",

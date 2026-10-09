@@ -24,6 +24,7 @@ import {
 } from "./heartbeat/config.js";
 import { consumeNextWakeEvent, insertWakeEvent } from "./state/database.js";
 import { runAgentLoop } from "./agent/loop.js";
+import { shutdownLocalWorkers } from "./orchestration/local-worker.js";
 import { ModelRegistry } from "./inference/registry.js";
 import { loadSkills } from "./skills/loader.js";
 import { initStateRepo } from "./git/state-versioning.js";
@@ -398,12 +399,28 @@ async function run(): Promise<void> {
   logger.info(`[${new Date().toISOString()}] Heartbeat daemon started.`);
 
   // Handle graceful shutdown
-  const shutdown = () => {
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info(`[${new Date().toISOString()}] Shutting down...`);
     heartbeat.stop();
-    db.setAgentState("sleeping");
-    db.close();
-    process.exit(0);
+    const finish = () => {
+      db.setAgentState("sleeping");
+      db.close();
+      process.exit(0);
+    };
+    // Harness cancellation is cooperative. A stuck request cannot hold up a
+    // supervised restart forever; unfinished tasks are recovered next launch.
+    const deadline = setTimeout(finish, 5_000);
+    try {
+      await shutdownLocalWorkers(db.raw, identity.address);
+    } catch (error) {
+      logger.error("Local worker shutdown failed", error instanceof Error ? error : undefined);
+    } finally {
+      clearTimeout(deadline);
+      finish();
+    }
   };
 
   process.on("SIGTERM", shutdown);
@@ -413,7 +430,7 @@ async function run(): Promise<void> {
   // The automaton alternates between running and sleeping.
   // The heartbeat can wake it up.
 
-  while (true) {
+  while (!shuttingDown) {
     try {
       // Reload skills (may have changed since last loop)
       try {

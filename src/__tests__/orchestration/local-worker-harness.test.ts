@@ -215,7 +215,7 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
       id: "task-slow",
       goalId: "goal-1",
       agentRole: "custom-slow",
-      status: "assigned",
+      status: "pending",
       assignedTo: null,
       maxRetries: 0,
     });

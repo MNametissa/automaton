@@ -88,9 +88,25 @@ avec une clé fournie ; la référence MCP locale n'est pas une clé remise au r
 
 `gh` confirme MNametissa et son accès ADMIN au fork. L'identité GitHub d'exploitation
 n'est pas créée. Une GitHub App sur ce dépôt est proposée ; son provisionnement,
-la promotion de versions, le superviseur persistant, le contrôleur de budget commun,
+la promotion de versions, le déploiement du superviseur, le contrôleur de budget commun,
 le monitoring continu et le circuit marchand restent à réaliser après revue.
 Le budget externe demeure 0 $. Aucune ressource payante ni aucun modèle lancé.
+
+Autonomie locale ajoutée : pool conservé entre réveils, quatre travailleurs simultanés
+par défaut (`maxLocalWorkers`), tâches excédentaires en attente, affectation atomique,
+récupération des tâches assigned/running orphelines et arrêt coopératif borné à cinq
+secondes. En standalone, les anciens enfants distants ne sont plus réutilisés.
+Les workers sont des tâches asynchrones du même processus ; aucun pod supplémentaire.
+
+`conway-local/supervision.mjs` prépare une configuration Supervisor 4.3.0 pour gateway,
+agent et observateur Runpod optionnel. Il exige un état standalone déjà provisionné
+avec le même control.db et ne lance aucun service. Le superviseur est dans l'image.
+Un test réel tue le processus de test, vérifie la relance, la persistance et l'arrêt.
+`profiles/i-am-alive/heartbeat.yml` propose le réveil check_work chaque minute et
+les métriques toutes les cinq minutes ; aucun état utilisateur modifié. Le réveil
+demande du travail prêt, de la planification/reprise ou une vérification finale,
+avec allocation positive et déduplication. Cette supervision ne rallume pas un pod
+arrêté et ne garantit pas une seule exécution des effets externes après un crash.
 
 ### Priorités suivantes
 
