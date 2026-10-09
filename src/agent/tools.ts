@@ -1,3 +1,4 @@
+import { paymentContext } from '../payments/context.js';
 /**
  * Automaton Tool System
  *
@@ -249,6 +250,30 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
 
     // ── Conway API Tools ──
     {
+      name: 'payment_status', description: 'Read confirmed payment budgets and unresolved holds. Does not send payments.',
+      category: 'financial', riskLevel: 'safe', parameters: { type: 'object', properties: {} },
+      execute: async (_args, ctx) => {
+        const payment = paymentContext(ctx.config, ctx.db.raw);
+        return JSON.stringify({ limits: payment.limits, attempts: payment.ledger.summary(), recent: payment.ledger.recent(),
+          recovery: 'Unknown transaction hashes stay held. Find the hash from provider or chain evidence, then use reconcile_payment. Reuse purchase_id on retries; a new ID means a new purchase only after the previous payment is resolved.' });
+      },
+    },
+    {
+      name: 'reconcile_payment', description: 'Verify a known transaction hash against an unresolved payment nonce, token, amount and recipient. Never sends a payment.',
+      category: 'financial', riskLevel: 'safe', parameters: { type: 'object', properties: {
+        attempt_id: { type: 'string' }, transaction_hash: { type: 'string' },
+      }, required: ['attempt_id', 'transaction_hash'] },
+      execute: async (args, ctx) => {
+        if (ctx.config.standalone) return 'External settlement lookup is disabled in standalone mode.';
+        const { reconcilePayment } = await import('../payments/settlement.js');
+        const payment = paymentContext(ctx.config, ctx.db.raw);
+        const confirmed = await reconcilePayment(payment.ledger, String(args.attempt_id), String(args.transaction_hash));
+        const attempt = payment.ledger.get(String(args.attempt_id));
+        return JSON.stringify({ confirmed, attempt: attempt ? { id: attempt.id, status: attempt.status, txHash: attempt.tx_hash, fulfilled: attempt.fulfilled } : null,
+          note: 'Confirmation proves the debit. Missing delivery evidence remains unresolved; do not repay.' });
+      },
+    },
+    {
       name: "check_credits",
       description: "Check your current Conway compute credit balance.",
       category: "conway",
@@ -288,6 +313,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
             description:
               "Amount in USD to spend on credits. Must be one of the valid tiers: 5, 25, 100, 500, 1000, 2500.",
           },
+          purchase_id: { type: 'string', description: 'Stable ID for this purchase; reuse on retries. A new ID explicitly requests a new purchase after prior delivery. Without it, a confirmed result is replayed.' },
         },
         required: ["amount_usd"],
       },
@@ -317,24 +343,14 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
           ctx.config.conwayApiUrl,
           ctx.identity.account,
           amountUsd,
+          undefined, { ...paymentContext(ctx.config, ctx.db.raw), purchaseId: args.purchase_id as string | undefined },
         );
 
         if (!result.success) {
-          return `Credit topup failed: ${result.error}`;
+          return `Credit topup not completed: ${result.error} (payment: ${result.paymentStatus ?? 'not submitted'}, attempt: ${result.attemptId ?? 'none'})`;
         }
 
-        // Record transaction
-        const { ulid } = await import("ulid");
-        ctx.db.insertTransaction({
-          id: ulid(),
-          type: "credit_purchase",
-          amountCents: amountUsd * 100,
-          balanceAfterCents: result.creditsCentsAdded,
-          description: `x402 credit topup: $${amountUsd} USD`,
-          timestamp: new Date().toISOString(),
-        });
-
-        return `Credit topup successful: +$${amountUsd} (${amountUsd * 100} cents) credits purchased via x402. Check your new balance with check_credits.`;
+        return `${result.replayed ? 'Previous purchase replayed; no new payment' : 'Credit topup confirmed'}: ${result.paidAmountCents} cents paid, ${result.creditsCentsAdded} credit cents in that purchase. Check your current balance with check_credits.`;
       },
     },
     {
@@ -1664,6 +1680,7 @@ Model: ${ctx.inference.getDefaultModel()}
               ctx.db.setKV("last_sandbox_topup_attempt", new Date().toISOString());
               const { topupForSandbox } = await import("../conway/topup.js");
               const topup = await topupForSandbox({
+                paymentContext: paymentContext(ctx.config, ctx.db.raw),
                 apiUrl: ctx.config.conwayApiUrl,
                 account: ctx.identity.account,
                 error: err,
@@ -2737,6 +2754,7 @@ Model: ${ctx.inference.getDefaultModel()}
             type: "string",
             description: "The URL to fetch",
           },
+          purchase_id: { type: 'string', description: 'Stable ID for this purchase; reuse on retries. A new ID explicitly requests a new purchase after prior delivery. Without it, a confirmed result is replayed.' },
           method: {
             type: "string",
             description: "HTTP method (default: GET)",
@@ -2778,10 +2796,11 @@ Model: ${ctx.inference.getDefaultModel()}
           body,
           extraHeaders,
           maxPayment,
+          chainType, { ...paymentContext(ctx.config, ctx.db.raw, 'x402_fetch'), purchaseId: args.purchase_id as string | undefined },
         );
 
         if (!result.success) {
-          return `x402 fetch failed: ${result.error || "Unknown error"}`;
+          return `x402 fetch not completed: ${result.error || "Unknown error"} (payment: ${result.paymentStatus ?? 'not submitted'}, attempt: ${result.attemptId ?? 'none'})`;
         }
 
         const responseStr =
@@ -3372,28 +3391,6 @@ export async function executeTool(
               error instanceof Error ? error : undefined,
             );
           }
-        }
-      } else if (toolName === "x402_fetch") {
-        // x402 payment amounts are determined by the server response,
-        // but we record a nominal entry for tracking purposes
-        try {
-          turnContext.sessionSpend.recordSpend({
-            toolName: "x402_fetch",
-            amountCents: 0, // Actual amount is inside the x402 protocol
-            domain: (() => {
-              try {
-                return new URL(args.url as string).hostname;
-              } catch {
-                return undefined;
-              }
-            })(),
-            category: "x402",
-          });
-        } catch (error) {
-          logger.error(
-            "Spend tracking failed for x402_fetch",
-            error instanceof Error ? error : undefined,
-          );
         }
       }
     }

@@ -8,181 +8,20 @@
 import {
   createPublicClient,
   http,
-  parseUnits,
   type Address,
   type PrivateKeyAccount,
 } from "viem";
-import { base, baseSepolia } from "viem/chains";
+import { createHash } from 'node:crypto';
+import type { PaymentContext } from '../payments/context.js';
+import { reconcilePayment } from '../payments/settlement.js';
 import { ResilientHttpClient } from "./http-client.js";
 import type { ChainType } from "../identity/chain.js";
 
 const x402HttpClient = new ResilientHttpClient();
 
-// USDC contract addresses
-const USDC_ADDRESSES: Record<string, Address> = {
-  "eip155:8453": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // Base mainnet
-  "eip155:84532": "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // Base Sepolia
-};
-
-const CHAINS: Record<string, any> = {
-  "eip155:8453": base,
-  "eip155:84532": baseSepolia,
-};
-type NetworkId = keyof typeof USDC_ADDRESSES;
-
-const BALANCE_OF_ABI = [
-  {
-    inputs: [{ name: "account", type: "address" }],
-    name: "balanceOf",
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-    type: "function",
-  },
-] as const;
-
-interface PaymentRequirement {
-  scheme: string;
-  network: NetworkId;
-  maxAmountRequired: string;
-  payToAddress: Address;
-  requiredDeadlineSeconds: number;
-  usdcAddress: Address;
-}
-
-interface PaymentRequiredResponse {
-  x402Version: number;
-  accepts: PaymentRequirement[];
-}
-
-interface ParsedPaymentRequirement {
-  x402Version: number;
-  requirement: PaymentRequirement;
-}
-
-interface X402PaymentResult {
-  success: boolean;
-  response?: any;
-  error?: string;
-  status?: number;
-}
-
-export interface UsdcBalanceResult {
-  balance: number;
-  network: string;
-  ok: boolean;
-  error?: string;
-}
-
-function safeJsonParse(value: string): unknown | null {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function parsePositiveInt(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return Math.floor(value);
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
-  }
-  return null;
-}
-
-function normalizeNetwork(raw: unknown): NetworkId | null {
-  if (typeof raw !== "string") return null;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "base") return "eip155:8453";
-  if (normalized === "base-sepolia") return "eip155:84532";
-  if (normalized === "eip155:8453" || normalized === "eip155:84532") {
-    return normalized;
-  }
-  return null;
-}
-
-function normalizePaymentRequirement(raw: unknown): PaymentRequirement | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const value = raw as Record<string, unknown>;
-  const network = normalizeNetwork(value.network);
-  if (!network) return null;
-
-  const scheme = typeof value.scheme === "string" ? value.scheme : null;
-  const maxAmountRequired = typeof value.maxAmountRequired === "string"
-    ? value.maxAmountRequired
-    : typeof value.maxAmountRequired === "number" &&
-        Number.isFinite(value.maxAmountRequired)
-      ? String(value.maxAmountRequired)
-      : null;
-  const payToAddress = typeof value.payToAddress === "string"
-    ? value.payToAddress
-    : typeof value.payTo === "string"
-      ? value.payTo
-      : null;
-  const usdcAddress = typeof value.usdcAddress === "string"
-    ? value.usdcAddress
-    : typeof value.asset === "string"
-      ? value.asset
-      : USDC_ADDRESSES[network];
-  const requiredDeadlineSeconds =
-    parsePositiveInt(value.requiredDeadlineSeconds) ??
-    parsePositiveInt(value.maxTimeoutSeconds) ??
-    300;
-
-  if (!scheme || !maxAmountRequired || !payToAddress || !usdcAddress) {
-    return null;
-  }
-
-  return {
-    scheme,
-    network,
-    maxAmountRequired,
-    payToAddress: payToAddress as Address,
-    requiredDeadlineSeconds,
-    usdcAddress: usdcAddress as Address,
-  };
-}
-
-function normalizePaymentRequired(raw: unknown): PaymentRequiredResponse | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const value = raw as Record<string, unknown>;
-  if (!Array.isArray(value.accepts)) return null;
-
-  const accepts = value.accepts
-    .map(normalizePaymentRequirement)
-    .filter((v): v is PaymentRequirement => v !== null);
-  if (!accepts.length) return null;
-
-  const x402Version = parsePositiveInt(value.x402Version) ?? 1;
-  return { x402Version, accepts };
-}
-
-function parseMaxAmountRequired(maxAmountRequired: string, x402Version: number): bigint {
-  const amount = maxAmountRequired.trim();
-  if (!/^\d+(\.\d+)?$/.test(amount)) {
-    throw new Error(`Invalid maxAmountRequired: ${maxAmountRequired}`);
-  }
-
-  if (amount.includes(".")) {
-    return parseUnits(amount, 6);
-  }
-  if (x402Version >= 2 || amount.length > 6) {
-    return BigInt(amount);
-  }
-  return parseUnits(amount, 6);
-}
-
-function selectRequirement(parsed: PaymentRequiredResponse): PaymentRequirement {
-  const exactSupported = parsed.accepts.find(
-    (r) => r.scheme === "exact" && !!CHAINS[r.network],
-  );
-  if (exactSupported) return exactSupported;
-  return parsed.accepts[0];
-}
+import { USDC_ADDRESSES, CHAINS, BALANCE_OF_ABI, parsePaymentRequired, signPayment, parseMaxAmountRequired } from './x402-protocol.js';
+import type { X402PaymentResult, UsdcBalanceResult, PaymentRequirement } from './x402-protocol.js';
+export type { UsdcBalanceResult } from './x402-protocol.js';
 
 /** Solana USDC mint address (mainnet). */
 const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -317,208 +156,104 @@ export async function x402Fetch(
   headers?: Record<string, string>,
   maxPaymentCents?: number,
   chainType?: ChainType,
+  context?: PaymentContext,
 ): Promise<X402PaymentResult> {
-  // Solana wallets cannot sign EVM x402 payments
-  if (chainType === "solana") {
-    return {
-      success: false,
-      error: "x402 payment requires an EVM wallet. Solana automatons should use Conway credits API instead.",
-    };
-  }
-
+  let attemptId: string | undefined;
+  let submitted = false;
+  let amountAtomic: string | undefined;
   try {
-    // Initial request (non-mutating probe, uses resilient client)
+    if (chainType === 'solana') throw new Error('x402 payment requires an EVM wallet');
+    const target = new URL(url);
+    if (target.username || target.password) throw new Error('Credentials in payment URLs are forbidden');
+    const extraHeaders = new Headers(headers);
+    for (const name of ['x-payment', 'payment-signature', 'payment-required', 'x-payment-required']) {
+      if (extraHeaders.has(name)) throw new Error('Caller-supplied payment headers are forbidden');
+    }
+    if (context?.purchaseId !== undefined && (typeof context.purchaseId !== 'string' || !context.purchaseId.trim() || context.purchaseId.length > 128)) {
+      throw new Error('Invalid purchase ID');
+    }
+    target.hash = '';
+    target.searchParams.sort();
+    const isTopup = context?.kind === 'topup_credits' || /\/pay\//i.test(decodeURIComponent(target.pathname));
+    const operationKey = createHash('sha256').update(JSON.stringify([
+      account.address.toLowerCase(),
+      isTopup ? [target.origin, 'topup'] : [target.href, method.toUpperCase(), body ?? ''],
+    ])).digest('hex');
+    const canonicalHeaders: [string, string][] = [];
+    extraHeaders.forEach((value, key) => canonicalHeaders.push([key, value]));
+    const requestFingerprint = createHash('sha256').update(JSON.stringify([
+      target.href, method.toUpperCase(), body ?? '', canonicalHeaders.sort(),
+    ])).digest('hex');
+    const previous = context?.ledger.completed(operationKey, context.purchaseId);
+    if (previous) {
+      if (previous.request_fingerprint !== requestFingerprint) throw new Error('Purchase ID already belongs to a different request; inspect payment_status before requesting a new purchase');
+      return { success: true, paymentStatus: 'confirmed', replayed: true, attemptId: previous.id,
+        amountAtomic: previous.amount_atomic, status: previous.response_status!, response: JSON.parse(previous.response_json!) };
+    }
     const initialResp = await x402HttpClient.request(url, {
-      method,
-      headers: { ...headers, "Content-Type": "application/json" },
-      body,
+      method, headers: { ...headers, 'Content-Type': 'application/json' }, body,
+      redirect: 'error', retries: 0,
     });
-
     if (initialResp.status !== 402) {
-      const data = await initialResp
-        .json()
-        .catch(() => initialResp.text());
-      return { success: initialResp.ok, response: data, status: initialResp.status };
+      return { success: initialResp.ok, response: await readResponse(initialResp), status: initialResp.status, paymentStatus: 'unpaid' };
     }
-
-    // Parse payment requirements
+    if (!context) throw new Error('Explicit durable payment budget is required');
+    if (target.protocol !== 'https:') throw new Error('Payments require HTTPS');
+    if (!context.allowedDomains.some(domain => target.hostname === domain || target.hostname.endsWith('.' + domain))) {
+      throw new Error('Payment domain is not authorized');
+    }
     const parsed = await parsePaymentRequired(initialResp);
-    if (!parsed) {
-      return {
-        success: false,
-        error: "Could not parse payment requirements",
-        status: initialResp.status,
-      };
+    if (!parsed) throw new Error('Unsupported or invalid payment requirements');
+    const amount = parseMaxAmountRequired(parsed.requirement.maxAmountRequired, parsed.x402Version);
+    amountAtomic = amount.toString();
+    const limit = maxPaymentCents ?? context.limits.maxSingleCents;
+    if (!Number.isSafeInteger(limit) || limit < 0 || amount > BigInt(limit) * 10000n) {
+      throw new Error('Payment exceeds the authorized amount');
     }
-
-    // Check amount against maxPaymentCents BEFORE signing
-    if (maxPaymentCents !== undefined) {
-      const amountAtomic = parseMaxAmountRequired(
-        parsed.requirement.maxAmountRequired,
-        parsed.x402Version,
-      );
-      // Convert atomic units (6 decimals) to cents (2 decimals)
-      const amountCents = Number(amountAtomic) / 10_000;
-      if (amountCents > maxPaymentCents) {
-        return {
-          success: false,
-          error: `Payment of ${amountCents.toFixed(2)} cents exceeds max allowed ${maxPaymentCents} cents`,
-          status: 402,
-        };
-      }
-    }
-
-    // Sign payment
-    let payment: any;
-    try {
-      payment = await signPayment(
-        account,
-        parsed.requirement,
-        parsed.x402Version,
-      );
-    } catch (err: any) {
-      return {
-        success: false,
-        error: `Failed to sign payment: ${err?.message || String(err)}`,
-        status: initialResp.status,
-      };
-    }
-
-    // Retry with payment
-    const paymentHeader = Buffer.from(
-      JSON.stringify(payment),
-    ).toString("base64");
-
+    attemptId = context.ledger.reserve({ operationKey, payer: account.address, recipient: parsed.requirement.payToAddress,
+      asset: parsed.requirement.usdcAddress, network: parsed.requirement.network, amountAtomic,
+      domain: target.hostname, kind: context.kind, purchaseId: context.purchaseId, requestFingerprint }, context.limits);
+    const payment = await signPayment(account, parsed.requirement, parsed.x402Version);
+    context.ledger.submitted(attemptId, payment.payload.authorization.nonce);
+    submitted = true;
+    const paymentHeader = parsed.x402Version === 2 ? 'PAYMENT-SIGNATURE' : 'X-Payment';
     const paidResp = await x402HttpClient.request(url, {
-      method,
-      headers: {
-        ...headers,
-        "Content-Type": "application/json",
-        "X-Payment": paymentHeader,
-      },
-      body,
-      retries: 0, // Paid request: do not auto-retry (payment already signed)
+      method, headers: { ...headers, 'Content-Type': 'application/json',
+        [paymentHeader]: Buffer.from(JSON.stringify(payment)).toString('base64') },
+      body, redirect: 'error', retries: 0,
     });
-
-    const data = await paidResp.json().catch(() => paidResp.text());
-    return { success: paidResp.ok, response: data, status: paidResp.status };
-  } catch (err: any) {
-    return { success: false, error: err.message };
-  }
-}
-
-async function parsePaymentRequired(
-  resp: Response,
-): Promise<ParsedPaymentRequirement | null> {
-  const header = resp.headers.get("X-Payment-Required");
-  if (header) {
-    const rawHeader = safeJsonParse(header);
-    const normalizedRaw = normalizePaymentRequired(rawHeader);
-    if (normalizedRaw) {
-      return {
-        x402Version: normalizedRaw.x402Version,
-        requirement: selectRequirement(normalizedRaw),
-      };
-    }
-
+    // Persist the hash before reading a possibly broken response stream.
+    let settlement: Record<string, unknown> | undefined;
     try {
-      const decoded = Buffer.from(header, "base64").toString("utf-8");
-      const parsedDecoded = normalizePaymentRequired(safeJsonParse(decoded));
-      if (parsedDecoded) {
-        return {
-          x402Version: parsedDecoded.x402Version,
-          requirement: selectRequirement(parsedDecoded),
-        };
-      }
-    } catch {
-      // Ignore header decode errors and continue with body parsing.
+      const encoded = paidResp.headers.get('PAYMENT-RESPONSE') ?? paidResp.headers.get('X-PAYMENT-RESPONSE');
+      if (encoded) settlement = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+    } catch { /* An invalid provider receipt is not proof of settlement. */ }
+    const hash = typeof settlement?.transaction === 'string' && /^0x[0-9a-fA-F]{64}$/.test(settlement.transaction)
+      ? settlement.transaction : undefined;
+    context.ledger.uncertain(attemptId, hash);
+    const data = await readResponse(paidResp);
+    const credits = data && typeof data === 'object' ? (data as Record<string, unknown>).credits_cents : undefined;
+    const tier = Number(decodeURIComponent(target.pathname).match(/\/pay\/(\d+)\//i)?.[1]);
+    const expectedCredits = context.expectedCreditsCents ?? (Number.isSafeInteger(tier) && tier > 0 ? tier * 100 : Infinity);
+    const delivered = paidResp.ok && (!isTopup
+      || (Number.isSafeInteger(credits) && Number(credits) >= expectedCredits));
+    context.ledger.delivery(attemptId, data, paidResp.status, delivered);
+    const confirmed = await reconcilePayment(context.ledger, attemptId);
+    return { success: confirmed && delivered, response: data, status: paidResp.status,
+      paymentStatus: confirmed ? 'confirmed' : 'uncertain', attemptId, amountAtomic,
+      ...(!confirmed ? { error: 'Payment settlement is uncertain; reservation retained, do not repay' }
+        : !delivered ? { error: 'Payment confirmed but delivery is unverified; do not repay' } : {}) };
+  } catch (error) {
+    if (context && attemptId) {
+      if (submitted) context.ledger.uncertain(attemptId);
+      else context.ledger.release(attemptId);
     }
-  }
-
-  try {
-    const body = await resp.json();
-    const parsedBody = normalizePaymentRequired(body);
-    if (!parsedBody) return null;
-    return {
-      x402Version: parsedBody.x402Version,
-      requirement: selectRequirement(parsedBody),
-    };
-  } catch {
-    return null;
+    return { success: false, error: error instanceof Error ? error.message : String(error),
+      paymentStatus: submitted ? 'uncertain' : 'blocked', attemptId, amountAtomic };
   }
 }
 
-async function signPayment(
-  account: PrivateKeyAccount,
-  requirement: PaymentRequirement,
-  x402Version: number,
-): Promise<any> {
-  const chain = CHAINS[requirement.network];
-  if (!chain) {
-    throw new Error(`Unsupported network: ${requirement.network}`);
-  }
-
-  const nonce = `0x${Buffer.from(
-    crypto.getRandomValues(new Uint8Array(32)),
-  ).toString("hex")}`;
-
-  const now = Math.floor(Date.now() / 1000);
-  const validAfter = now - 60;
-  const validBefore = now + requirement.requiredDeadlineSeconds;
-  const amount = parseMaxAmountRequired(
-    requirement.maxAmountRequired,
-    x402Version,
-  );
-
-  // EIP-712 typed data for TransferWithAuthorization
-  const domain = {
-    name: "USD Coin",
-    version: "2",
-    chainId: chain.id,
-    verifyingContract: requirement.usdcAddress,
-  } as const;
-
-  const types = {
-    TransferWithAuthorization: [
-      { name: "from", type: "address" },
-      { name: "to", type: "address" },
-      { name: "value", type: "uint256" },
-      { name: "validAfter", type: "uint256" },
-      { name: "validBefore", type: "uint256" },
-      { name: "nonce", type: "bytes32" },
-    ],
-  } as const;
-
-  const message = {
-    from: account.address,
-    to: requirement.payToAddress,
-    value: amount,
-    validAfter: BigInt(validAfter),
-    validBefore: BigInt(validBefore),
-    nonce: nonce as `0x${string}`,
-  };
-
-  const signature = await account.signTypedData({
-    domain,
-    types,
-    primaryType: "TransferWithAuthorization",
-    message,
-  });
-
-  return {
-    x402Version,
-    scheme: requirement.scheme,
-    network: requirement.network,
-    payload: {
-      signature,
-      authorization: {
-        from: account.address,
-        to: requirement.payToAddress,
-        value: amount.toString(),
-        validAfter: validAfter.toString(),
-        validBefore: validBefore.toString(),
-        nonce,
-      },
-    },
-  };
+async function readResponse(response: Response): Promise<unknown> {
+  const text = await response.text();
+  try { return JSON.parse(text); } catch { return text; }
 }

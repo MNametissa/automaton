@@ -20,6 +20,9 @@ const USDC_TOPUP_OLD_SCHEDULE = "0 */12 * * *";
 const DEFAULT_HEARTBEAT_CONFIG: HeartbeatConfig = {
   entries: [
     {
+      name: 'reconcile_payments', schedule: '*/5 * * * *', task: 'reconcile_payments', enabled: true,
+    },
+    {
       name: "heartbeat_ping",
       schedule: "*/15 * * * *",
       task: "heartbeat_ping",

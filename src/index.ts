@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { paymentContext } from './payments/context.js';
 /**
  * Conway Automaton Runtime
  *
@@ -352,6 +353,7 @@ async function run(): Promise<void> {
         (async () => {
           const creditsCents = await conway.getCreditsBalance().catch(() => 0);
           const topupResult = await bootstrapTopup({
+            paymentContext: paymentContext(config, db.raw),
             apiUrl: config.conwayApiUrl,
             account,
             creditsCents,

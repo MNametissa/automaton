@@ -43,6 +43,8 @@ export interface ProvisionResult {
 export interface AutomatonConfig {
   /** Local gateway profile: no automatic purchases or external provider fallback. */
   standalone?: boolean;
+  /** Explicit real-payment allowance; absent means no external payments. */
+  paymentLimits?: import('./payments/ledger.js').PaymentLimits;
   name: string;
   genesisPrompt: string;
   creatorMessage?: string;

@@ -1,3 +1,4 @@
+import { paymentContext } from '../payments/context.js';
 /**
  * The Agent Loop
  *
@@ -281,6 +282,7 @@ export async function runAgentLoop(
                   try {
                     const { topupForSandbox } = await import("../conway/topup.js");
                     const topupResult = await topupForSandbox({
+                      paymentContext: paymentContext(config, db.raw),
                       apiUrl: config.conwayApiUrl,
                       account: identity.account,
                       error: sandboxError,
@@ -476,6 +478,7 @@ export async function runAgentLoop(
             try {
               const { bootstrapTopup } = await import("../conway/topup.js");
               const topupResult = await bootstrapTopup({
+                paymentContext: paymentContext(config, db.raw),
                 apiUrl: config.conwayApiUrl,
                 account: identity.account,
                 creditsCents: financial.creditsCents,

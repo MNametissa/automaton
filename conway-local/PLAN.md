@@ -54,6 +54,10 @@ Pour un objectif complexe : objectif → classification → plan → revue → t
 | Reprise et chemins | Tours contenant uniquement des outils restaurés ; chemins d’état et de travail configurables | Tests ciblés de reprise et écriture par outil |
 | Isolation | Image Node 22, utilisateur non privilégié ; smoke test sans réseau, sans clés hôte, racine en lecture seule | Script de smoke test utilise stockage temporaire ; ce n’est pas encore un déploiement persistant |
 | Évaluation | Trois missions et critères définis dans missions.json | Aucun benchmark avec vrai modèle effectué |
+| Budget des paiements USDC | Migration SQLite V12 ; réservation atomique partagée entre x402 et toutes les recharges ; plafonds explicites total, quotidien UTC et par paiement | Absent = 0 ; standalone impose 0. Plafonds en centimes, montants atomiques conservés ; réservation arrondie au centime supérieur. Ce budget ne couvre pas les transferts USDC directs, les crédits Conway transférés ou les factures d’inférence |
+| Émission et comptabilité | Montants x402 v1/v2 en unités atomiques ; domaine USDC Base/Base Sepolia ; HTTPS et domaines autorisés ; signature EIP-3009 seulement | Permit2, ERC-7710, upfront et escrow refusés. HTTP 200 ne prouve pas le débit. Confirmation via receipt, Transfer exact, AuthorizationUsed du nonce et deux confirmations RPC ; pas de garantie de finalité économique |
+| Reprise des achats | Résultat HTTP durable ; même opération et purchase_id rejoue le résultat confirmé ; nouvelle intention explicite pour racheter | Aucun nouvel ID ne débloque une opération encore incertaine ou sans livraison vérifiée. Les recharges automatiques sans ID n’achètent pas indéfiniment : après le premier achat, l’agent doit examiner son solde et demander une nouvelle recharge avec un nouvel ID |
+| Rapprochement | Heartbeat vérifie au plus deux transactions connues par passage ; écritures comptables atomiques et uniques ; payment_status et reconcile_payment disponibles | Si hash perdu, réservation maintenue ; l’agent doit retrouver le hash auprès du fournisseur ou de la chaîne puis le soumettre à vérification. Pas de recherche automatique des événements sans hash, remboursement, ni récupération automatique d’une livraison manquante |
 
 ## Travail restant pour l’autonomie opérationnelle
 
@@ -61,8 +65,8 @@ Pour un objectif complexe : objectif → classification → plan → revue → t
 2. Relier réellement les transports MCP et leurs vérifications de santé avant d’ajouter navigateur ou bureau.
 3. Tester les trois missions avec un vrai modèle local disponible, conserver traces, temps, tokens, erreurs et interventions. À 0 $, aucune instance GPU payante à créer.
 4. Préparer le déploiement persistant sur les machines autorisées : volumes séparés, supervision de processus, récupération après arrêt, contrôle réseau. Le smoke test isolé ne remplace pas ce travail.
-5. Si un budget externe est autorisé plus tard : facturation fournisseur, réservation concurrente des dépenses, rapprochement des coûts, arrêt des ressources. Une commande fund locale n’effectue aucun paiement.
-6. Paiements, revenus et trading : intégrations distinctes non implémentées et non évaluées ; ne pas les présenter comme une conséquence automatique de la mémoire ou de l’orchestration.
+5. Si un budget externe est autorisé plus tard : facturation fournisseur, budget commun à toutes les catégories (au-delà du circuit x402 désormais réservé), rapprochement des coûts, arrêt des ressources. Une commande fund locale n’effectue aucun paiement. Un achat USDC nécessite des fonds réels préalablement présents dans le portefeuille ; configurer un plafond ne crée ni ne débite de l’argent.
+6. Compléter la récupération des paiements sans hash, des signatures interrompues et des livraisons manquantes ; évaluer le protocole auprès d’un fournisseur avant activation. Revenus et trading restent des intégrations distinctes non implémentées et non évaluées.
 
 ## Commandes de validation
 

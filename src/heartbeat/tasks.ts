@@ -1,3 +1,4 @@
+import { paymentContext } from '../payments/context.js';
 /**
  * Built-in Heartbeat Tasks
  *
@@ -44,6 +45,12 @@ export const COLONY_TASK_INTERVALS_MS = {
 } as const;
 
 export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
+  reconcile_payments: async (_ctx, taskCtx) => {
+    if (taskCtx.config.standalone) return { shouldWake: false };
+    const { reconcilePendingPayments } = await import('../payments/settlement.js');
+    const confirmed = await reconcilePendingPayments(paymentContext(taskCtx.config, taskCtx.db.raw).ledger);
+    return { shouldWake: confirmed > 0, ...(confirmed ? { message: `${confirmed} payment(s) confirmed on-chain. Check payment_status and delivery evidence before continuing.` } : {}) };
+  },
   heartbeat_ping: async (ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
     // Use ctx.creditBalance instead of calling conway.getCreditsBalance()
     const credits = ctx.creditBalance;
@@ -171,19 +178,20 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
 
       const { bootstrapTopup } = await import("../conway/topup.js");
       const result = await bootstrapTopup({
+        paymentContext: paymentContext(taskCtx.config, taskCtx.db.raw),
         apiUrl: taskCtx.config.conwayApiUrl,
         account: taskCtx.identity.account,
         creditsCents: credits,
         chainType: taskCtx.config.chainType || taskCtx.identity.chainType || "evm",
       });
 
-      if (result?.success) {
+      if (result?.success && !result.replayed) {
         logger.info(
           `Auto-topup successful: $${result.amountUsd} USD → ${result.creditsCentsAdded} credit cents`,
         );
         return {
           shouldWake: true,
-          message: `Auto-topped up $${result.amountUsd} in credits (was $${(credits / 100).toFixed(2)}). USDC remaining: ~$${(balance - result.amountUsd).toFixed(2)}.`,
+          message: `Auto-topped up ${result.creditsCentsAdded} credit cents (was $${(credits / 100).toFixed(2)}). Confirmed payment: ${result.paidAmountCents} cents.`,
         };
       }
 
@@ -192,7 +200,7 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
       logger.warn(`Auto-topup failed: ${errMsg}`);
       return {
         shouldWake: true,
-        message: `Low credits ($${(credits / 100).toFixed(2)}) with USDC available ($${balance.toFixed(2)}) but auto-topup failed: ${errMsg}. Use topup_credits to retry.`,
+        message: `Low credits ($${(credits / 100).toFixed(2)}) with USDC available ($${balance.toFixed(2)}). No new automatic topup: ${errMsg}. Inspect payment_status and current credits. Reuse the purchase ID to recover an existing result; choose a new ID only for an intentional new purchase after prior delivery is resolved.`,
       };
     }
 

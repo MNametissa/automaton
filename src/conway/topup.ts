@@ -18,6 +18,8 @@ import { x402Fetch, getUsdcBalance } from "./x402.js";
 import { createLogger } from "../observability/logger.js";
 import type { ChainType } from "../identity/chain.js";
 
+import type { PaymentContext } from '../payments/context.js';
+
 const logger = createLogger("topup");
 
 /** Valid topup tier amounts in USD. */
@@ -27,7 +29,11 @@ export interface TopupResult {
   success: boolean;
   amountUsd: number;
   creditsCentsAdded?: number;
+  paidAmountCents?: number;
   error?: string;
+  paymentStatus?: string;
+  attemptId?: string;
+  replayed?: boolean;
 }
 
 /**
@@ -41,33 +47,44 @@ export async function topupCredits(
   account: PrivateKeyAccount,
   amountUsd: number,
   recipientAddress?: Address,
+  context?: PaymentContext,
 ): Promise<TopupResult> {
+  if (!TOPUP_TIERS.includes(amountUsd)) return { success: false, amountUsd, error: 'Invalid topup tier' };
+  if (!context || context.limits.maxSingleCents < amountUsd * 100) return { success: false, amountUsd, error: 'Explicit payment budget does not authorize this topup' };
   const address = recipientAddress || account.address;
   const url = `${apiUrl}/pay/${amountUsd}/${address}`;
 
   logger.info(`Attempting credit topup: $${amountUsd} USD for ${address}`);
 
-  const result = await x402Fetch(url, account, "GET");
+  const result = await x402Fetch(url, account, "GET", undefined, undefined, amountUsd * 100, undefined,
+    { ...context, kind: 'topup_credits', expectedCreditsCents: amountUsd * 100 });
 
-  if (!result.success) {
+  if (!result.success || result.paymentStatus !== 'confirmed') {
     logger.error(`Credit topup failed: ${result.error}`);
     return {
       success: false,
       amountUsd,
-      error: result.error || `HTTP ${result.status}`,
+      error: result.error || `Unconfirmed topup: HTTP ${result.status}`,
+      paymentStatus: result.paymentStatus, attemptId: result.attemptId,
     };
   }
 
-  const creditsCentsAdded = typeof result.response === "object"
-    ? result.response?.credits_cents ?? result.response?.amount_cents ?? amountUsd * 100
-    : amountUsd * 100;
+  const creditsCentsAdded = Number(result.response?.credits_cents);
+  if (!Number.isSafeInteger(creditsCentsAdded) || creditsCentsAdded < amountUsd * 100) {
+    return { success: false, amountUsd, error: 'Credits received are unverified', paymentStatus: result.paymentStatus, attemptId: result.attemptId };
+  }
 
-  logger.info(`Credit topup successful: $${amountUsd} USD → ${creditsCentsAdded} credits cents`);
+  const paidAmountCents = Number(result.amountAtomic) / 10000;
+  logger.info(`${result.replayed ? 'Previous topup replayed; no new payment' : 'Credit topup confirmed'}: ${paidAmountCents} cents paid, ${creditsCentsAdded} credit cents in that purchase`);
 
   return {
     success: true,
     amountUsd,
     creditsCentsAdded,
+    paidAmountCents,
+    paymentStatus: result.paymentStatus,
+    attemptId: result.attemptId,
+    replayed: result.replayed,
   };
 }
 
@@ -83,8 +100,10 @@ export async function topupForSandbox(params: {
   account: PrivateKeyAccount;
   error: Error & { status?: number; responseText?: string };
   chainType?: ChainType;
+  paymentContext?: PaymentContext;
 }): Promise<TopupResult | null> {
   const { apiUrl, account, error, chainType } = params;
+  if (!params.paymentContext || params.paymentContext.limits.maxSingleCents < 500) return null;
 
   // Solana wallets cannot use x402 for topup (EVM-only payment protocol)
   if (chainType === "solana") {
@@ -134,7 +153,8 @@ export async function topupForSandbox(params: {
   }
 
   logger.info(`Sandbox topup: deficit=${deficitCents}c, buying $${selectedTier} tier`);
-  return topupCredits(apiUrl, account, selectedTier);
+  const result = await topupCredits(apiUrl, account, selectedTier, undefined, params.paymentContext);
+  return result.replayed ? null : result;
 }
 
 /**
@@ -151,8 +171,10 @@ export async function bootstrapTopup(params: {
   creditsCents: number;
   creditThresholdCents?: number;
   chainType?: ChainType;
+  paymentContext?: PaymentContext;
 }): Promise<TopupResult | null> {
   const { apiUrl, account, creditsCents, creditThresholdCents = 500, chainType } = params;
+  if (!params.paymentContext || params.paymentContext.limits.maxSingleCents < 500) return null;
 
   // Solana wallets cannot use x402 for topup (EVM-only payment protocol)
   if (chainType === "solana") {
@@ -188,5 +210,6 @@ export async function bootstrapTopup(params: {
     `Bootstrap topup: credits=$${(creditsCents / 100).toFixed(2)}, USDC=$${usdcBalance.toFixed(2)}, buying $${minTier}`,
   );
 
-  return topupCredits(apiUrl, account, minTier);
+  const result = await topupCredits(apiUrl, account, minTier, undefined, params.paymentContext);
+  return result.replayed ? null : result;
 }
