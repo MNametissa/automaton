@@ -294,6 +294,12 @@ describe("orchestration/SimpleFundingProtocol", () => {
     const balance = await funding.getBalance("0xunknown");
     expect(balance).toBe(0);
   });
+  it("gets the parent's actual gateway allocation for planning", async () => {
+    const conway = { getCreditsBalance: vi.fn().mockResolvedValue(175) } as any;
+    const funding = new SimpleFundingProtocol(conway, { address: '0xparent' } as any, makeMockDb(fundingDb));
+    expect(await funding.getBalance('0xparent')).toBe(175);
+    expect(conway.getCreditsBalance).toHaveBeenCalledOnce();
+  });
 
   it("recallCredits calls transferCredits back to the parent address", async () => {
     // Fund the child first so there's a balance to recall

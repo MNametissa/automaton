@@ -75,6 +75,7 @@ export class LocalWorkerPool {
       })
       .finally(() => {
         this.activeWorkers.delete(workerId);
+        this.config.db.prepare("UPDATE children SET status = 'cleaned_up' WHERE address = ?").run(address);
       });
 
     this.activeWorkers.set(workerId, { promise: workerPromise, abortController });

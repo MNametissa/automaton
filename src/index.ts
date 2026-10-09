@@ -193,6 +193,8 @@ async function run(): Promise<void> {
     config = await runSetupWizard();
   }
 
+  setGlobalLogLevel(config.logLevel);
+
   // Load wallet (chain-aware)
   const { account, chainIdentity, chainType: walletChainType } = await getWallet();
   const resolvedChainType = config.chainType || walletChainType || "evm";
@@ -278,7 +280,7 @@ async function run(): Promise<void> {
   }
 
   // Resolve Ollama base URL: env var takes precedence over config
-  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || config.ollamaBaseUrl;
+  const ollamaBaseUrl = config.standalone ? undefined : process.env.OLLAMA_BASE_URL || config.ollamaBaseUrl;
 
   // Create inference client — pass a live registry lookup so model names like
   // "gpt-oss:120b" route to Ollama based on their registered provider, not heuristics.
@@ -289,7 +291,7 @@ async function run(): Promise<void> {
     apiKey,
     defaultModel: config.inferenceModel,
     maxTokens: config.maxTokensPerTurn,
-    lowComputeModel: config.modelStrategy?.lowComputeModel || "gpt-5-mini",
+    lowComputeModel: config.standalone ? config.inferenceModel : config.modelStrategy?.lowComputeModel || "gpt-5-mini",
     openaiApiKey: config.openaiApiKey,
     anthropicApiKey: config.anthropicApiKey,
     ollamaBaseUrl,
@@ -336,6 +338,8 @@ async function run(): Promise<void> {
     logger.warn(`[${new Date().toISOString()}] State repo init failed: ${err.message}`);
   }
 
+  // No automatic real-money topups for a local allocation.
+  if (!config.standalone) {
   // Bootstrap topup: buy minimum credits ($5) from USDC so the agent can start.
   // The agent decides larger topups itself via the topup_credits tool.
   try {
@@ -366,6 +370,8 @@ async function run(): Promise<void> {
     }
   } catch (err: any) {
     logger.warn(`[${new Date().toISOString()}] Bootstrap topup skipped: ${err.message}`);
+  }
+
   }
 
   // Start heartbeat daemon (Phase 1.1: DurableScheduler)

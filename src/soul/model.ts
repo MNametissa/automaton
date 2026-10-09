@@ -1,3 +1,4 @@
+import { getAutomatonDir } from "../identity/wallet.js";
 /**
  * Soul Model — Data model, parser, writer for structured SOUL.md
  *
@@ -338,7 +339,7 @@ export function loadCurrentSoul(
 ): SoulModel | null {
   try {
     const home = process.env.HOME || "/root";
-    const resolvedPath = soulPath || path.join(home, ".automaton", "SOUL.md");
+    const resolvedPath = soulPath || path.join(getAutomatonDir(), "SOUL.md");
     if (!fs.existsSync(resolvedPath)) return null;
     const content = fs.readFileSync(resolvedPath, "utf-8");
     return parseSoulMd(content);

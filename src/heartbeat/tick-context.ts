@@ -43,6 +43,7 @@ export async function buildTickContext(
   config: HeartbeatConfig,
   walletAddress?: string,
   chainType?: string,
+  standalone = false,
 ): Promise<TickContext> {
   const tickId = generateTickId();
   const startedAt = new Date();
@@ -56,7 +57,7 @@ export async function buildTickContext(
   }
 
   let usdcBalance = 0;
-  if (walletAddress) {
+  if (walletAddress && !standalone) {
     try {
       const network = chainType === "solana" ? "solana:mainnet" : "eip155:8453";
       usdcBalance = await getUsdcBalance(walletAddress, network, chainType as any);

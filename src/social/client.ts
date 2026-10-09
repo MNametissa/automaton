@@ -34,7 +34,7 @@ export function createSocialClient(
   validateRelayUrl(relayUrl);
 
   const baseUrl = relayUrl.replace(/\/$/, "");
-  const httpClient = new ResilientHttpClient();
+  const httpClient = new ResilientHttpClient({ allowHttpOnLoopback: true });
 
   // Rate limiting state: track outbound message timestamps
   const outboundTimestamps: number[] = [];

@@ -1,0 +1,22 @@
+{
+  "evaluationKind": "operator-supervised, no paid calls authorized",
+  "missions": [
+    {
+      "id": "software",
+      "request": "Create stats.mjs: read a JSON number array from stdin and write count, sum and mean as JSON. Handle an empty array and reject malformed or nonnumeric input. Supply tests; diagnose and fix at least one observed failing case.",
+      "acceptance": ["[1,2,3] -> {count:3,sum:6,mean:2}", "[-2,0,5] -> {count:3,sum:3,mean:1}", "[] -> {count:0,sum:0,mean:null}", "Malformed input exits nonzero", "Retain test evidence and the repair explanation"]
+    },
+    {
+      "id": "website",
+      "request": "Create a small local website and a server.mjs accepting HOST and PORT. Include a health endpoint. Deploy only within the assigned environment, verify its HTTP responses and retain the launch and shutdown commands.",
+      "acceptance": ["GET / returns HTML and a meaningful title", "GET /health returns HTTP 200 and {status:ok}", "Unknown paths return HTTP 404", "Server can be stopped and restarted", "External publication remains pending operator configuration"]
+    },
+    {
+      "id": "report",
+      "request": "Produce a report from the operator-supplied source packet. Give each source an identifier, cite factual claims, separate inference from evidence, and describe contradictory or missing evidence.",
+      "acceptance": ["Every material factual claim names a source", "Quoted passages match the supplied source", "Calculations are reproducible", "Uncertainty is explicit", "A human checks that sources actually support the claims"]
+    }
+  ],
+  "metrics": ["acceptance checks passed", "interventions", "tool failures and recoveries", "elapsed time", "input/output tokens", "estimated cost", "provider-billed cost when available"],
+  "limitations": ["Fixture-based integration tests do not measure model reasoning", "No income or trading performance is implied", "Model selection and live evaluation remain unperformed until a suitable endpoint is configured"]
+}

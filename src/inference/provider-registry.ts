@@ -250,6 +250,7 @@ export class ProviderRegistry {
     providers: ProviderConfig[],
     tierDefaults: Record<ModelTier, TierDefault> = DEFAULT_TIER_DEFAULTS,
     emergencyStopCredits = DEFAULT_EMERGENCY_STOP_CREDITS,
+    private readonly apiKeys: Readonly<Record<string, string>> = {},
   ) {
     this.providers = providers
       .map((provider) => deepCloneProvider(provider))
@@ -444,6 +445,7 @@ export class ProviderRegistry {
   }
 
   private resolveApiKey(provider: ProviderConfig): string {
+    if (this.apiKeys[provider.id]) return this.apiKeys[provider.id];
     const configured = process.env[provider.apiKeyEnvVar];
     if (typeof configured === "string" && configured.length > 0) {
       return configured;

@@ -39,7 +39,7 @@ function isLoopbackHttpUrl(url: string | undefined): boolean {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
     return parsed.protocol.toLowerCase() === "http:" &&
-      (host === "localhost" || host === "127.0.0.1" || host === "::1");
+      (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]");
   } catch {
     return false;
   }
@@ -52,7 +52,7 @@ export function createInferenceClient(
   const httpClient = new ResilientHttpClient({
     baseTimeout: INFERENCE_TIMEOUT_MS,
     retryableStatuses: [429, 500, 502, 503, 504],
-    allowHttpOnLoopback: isLoopbackHttpUrl(ollamaBaseUrl),
+    allowHttpOnLoopback: isLoopbackHttpUrl(apiUrl) || isLoopbackHttpUrl(ollamaBaseUrl),
   });
   let currentModel = options.defaultModel;
   let maxTokens = options.maxTokens;

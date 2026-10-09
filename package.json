@@ -43,10 +43,13 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:coverage": "vitest run --coverage",
-    "test:security": "vitest run --grep 'security|injection|policy'",
-    "test:financial": "vitest run --grep 'financial|spend|treasury'",
+    "test:security": "vitest run -t \"security|injection|policy\"",
+    "test:financial": "vitest run -t \"financial|spend|treasury\"",
     "test:ci": "vitest run --reporter=verbose",
-    "clean": "rm -rf dist && pnpm -r clean"
+    "clean": "rm -rf dist && pnpm -r clean",
+    "test:local": "node --test --test-concurrency=1 conway-local/*.test.mjs && node conway-local/test.mjs",
+    "local:setup": "node conway-local/setup.mjs",
+    "local:control": "node conway-local/server.mjs"
   },
   "dependencies": {
     "@types/better-sqlite3": "^7.6.0",

@@ -1,0 +1,17 @@
+.git
+node_modules
+**/node_modules
+dist
+**/dist
+.local-work
+.superpowers
+.standalone
+.env
+.env.*
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.log
+*.pem
+*.key

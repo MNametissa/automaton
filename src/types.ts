@@ -41,6 +41,8 @@ export interface ProvisionResult {
 // ─── Configuration ───────────────────────────────────────────────
 
 export interface AutomatonConfig {
+  /** Local gateway profile: no automatic purchases or external provider fallback. */
+  standalone?: boolean;
   name: string;
   genesisPrompt: string;
   creatorMessage?: string;

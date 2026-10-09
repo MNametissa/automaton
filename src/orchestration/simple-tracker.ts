@@ -33,7 +33,7 @@ export class SimpleAgentTracker implements AgentTracker {
     ).all() as { id: string; name: string; address: string; status: string; role: string }[];
 
     return children
-      .filter((child) => IDLE_STATUSES.has(child.status as ChildStatus) && !assignedAddresses.has(child.address))
+      .filter((child) => !child.address.startsWith('local://') && IDLE_STATUSES.has(child.status as ChildStatus) && !assignedAddresses.has(child.address))
       .map((child) => ({
         address: child.address,
         name: child.name,
@@ -148,6 +148,7 @@ export class SimpleFundingProtocol implements FundingProtocol {
   // a direct API call. Alternatively, child agents could report their balance via
   // messaging (status_report with credit_balance field).
   async getBalance(childAddress: string): Promise<number> {
+    if (childAddress === this.identity.address) return this.conway.getCreditsBalance();
     const row = this.db.raw
       .prepare("SELECT funded_amount_cents FROM children WHERE address = ?")
       .get(childAddress) as { funded_amount_cents: number } | undefined;

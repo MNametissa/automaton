@@ -36,6 +36,9 @@ export { DEFAULT_TOKEN_BUDGET };
 export function estimateTokens(text: string): number {
   const content = text ?? "";
   const legacyEstimate = Math.ceil(content.length / 4);
+  // BPE tokenization can be quadratic for long repetitive observations. For
+  // large inputs use the UTF-8 byte count, a conservative upper budget bound.
+  if (content.length > 4_096) return Buffer.byteLength(content, "utf8");
   try {
     if (!tokenCounter) {
       tokenCounter = createTokenCounter();
@@ -163,8 +166,8 @@ export function buildContextMessages(
       });
     }
 
-    // The agent's thinking as assistant message
-    if (turn.thinking) {
+    // Tool-only assistant turns must survive restarts too.
+    if (turn.thinking || turn.toolCalls.length > 0) {
       const msg: ChatMessage = {
         role: "assistant",
         content: turn.thinking,

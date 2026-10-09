@@ -15,7 +15,7 @@ import { ResilientHttpClient } from "../conway/http-client.js";
 import type { ChainIdentity } from "./chain.js";
 import { buildSiwsMessage, signSiwsMessage } from "./siws.js";
 
-const httpClient = new ResilientHttpClient();
+const httpClient = new ResilientHttpClient({ allowHttpOnLoopback: true });
 
 const DEFAULT_API_URL = "https://api.conway.tech";
 
@@ -127,6 +127,7 @@ export async function provision(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(verifyBody),
+    retries: 0, // A nonce can only be consumed once.
   });
 
   if (!verifyResp.ok) {

@@ -315,6 +315,15 @@ describe("orchestration/Orchestrator", () => {
   // ─── matchTaskToAgent ────────────────────────────────────────
 
   describe("matchTaskToAgent", () => {
+    it("spawns a fresh local worker instead of reassigning a one-shot worker", async () => {
+      const goalId = insertGoal(db);
+      const oldWorker = { address: 'local://finished', name: 'Finished', role: 'generalist', status: 'healthy' };
+      const agentTracker = makeAgentTracker({ getIdle: vi.fn().mockReturnValue([oldWorker]), getBestForTask: vi.fn().mockReturnValue(oldWorker) });
+      const spawnAgent = vi.fn().mockResolvedValue({ address: 'local://new', name: 'New', sandboxId: 'new' });
+      const result = await makeOrchestrator(db, { agentTracker, config: { spawnAgent } }).matchTaskToAgent(makeTask(goalId));
+      expect(result.agentAddress).toBe('local://new');
+      expect(spawnAgent).toHaveBeenCalledTimes(1);
+    });
     function makeTask(goalId: string, overrides: Partial<{ agentRole: string; id: string }> = {}) {
       return {
         id: overrides.id ?? ulid(),

@@ -11,3 +11,7 @@ dist
 .automaton/wallet.json
 .automaton/state.db
 
+
+.standalone/
+*.sqlite
+*.sqlite-*

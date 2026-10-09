@@ -61,14 +61,29 @@ export function loadConfig(): AutomatonConfig | null {
       ...(raw.soulConfig ?? {}),
     };
 
+    const standalone = raw.standalone === true;
+    const conwayApiUrl = process.env.CONWAY_API_URL || raw.conwayApiUrl || DEFAULT_CONFIG.conwayApiUrl;
+    const localPaths = standalone ? {
+      dbPath: path.join(getAutomatonDir(), "state.db"),
+      heartbeatConfigPath: path.join(getAutomatonDir(), "heartbeat.yml"),
+      skillsDir: path.join(getAutomatonDir(), "skills"),
+    } : {};
     return {
       ...DEFAULT_CONFIG,
       ...raw,
+      ...localPaths,
       sandboxId:
         typeof raw.sandboxId === "string"
           ? raw.sandboxId.trim()
           : DEFAULT_CONFIG.sandboxId,
       conwayApiKey: apiKey,
+      conwayApiUrl,
+      ...(standalone ? {
+        socialRelayUrl: raw.socialRelayUrl ?? conwayApiUrl,
+        openaiApiKey: undefined,
+        anthropicApiKey: undefined,
+        ollamaBaseUrl: undefined,
+      } : {}),
       treasuryPolicy,
       modelStrategy,
       soulConfig,

@@ -6,6 +6,7 @@
  */
 
 import nodePath from "node:path";
+import { UNAVAILABLE_STANDALONE_TOOLS } from "../standalone/audit.js";
 import { ulid } from "ulid";
 import type {
   AutomatonTool,
@@ -34,17 +35,17 @@ const SANDBOX_HOME = "/root";
  * Validate that a file path resolves to within the allowed root directory.
  * Returns the resolved absolute path, or an error string if out of bounds.
  */
-function confinePathToSandbox(filePath: string): string | { error: string } {
+function confinePathToSandbox(filePath: string, root = SANDBOX_HOME): string | { error: string } {
   // Resolve ~ to SANDBOX_HOME
   const expanded = filePath.startsWith("~")
-    ? nodePath.join(SANDBOX_HOME, filePath.slice(1))
+    ? nodePath.join(root, filePath.slice(1))
     : filePath;
   // Resolve to absolute (relative paths resolve against SANDBOX_HOME)
-  const resolved = nodePath.resolve(SANDBOX_HOME, expanded);
+  const resolved = nodePath.resolve(root, expanded);
   // Ensure the resolved path is within the sandbox home
-  if (resolved !== SANDBOX_HOME && !resolved.startsWith(SANDBOX_HOME + "/")) {
+  if (resolved !== root && !resolved.startsWith(root + "/")) {
     return {
-      error: `Blocked: write_file path "${filePath}" resolves to "${resolved}" which is outside the allowed directory (${SANDBOX_HOME}). Writes are confined to the sandbox home.`,
+      error: `Blocked: write_file path "${filePath}" resolves to "${resolved}" which is outside the allowed directory (${root}). Writes are confined to the sandbox home.`,
     };
   }
   return resolved;
@@ -159,7 +160,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       execute: async (args, ctx) => {
         const filePath = args.path as string;
         // Path confinement: restrict writes to sandbox home directory
-        const confined = confinePathToSandbox(filePath);
+        const confined = confinePathToSandbox(filePath, ctx.config.standalone ? nodePath.resolve(process.env.AUTOMATON_WORKSPACE || process.cwd()) : SANDBOX_HOME);
         if (typeof confined === "object") return confined.error;
         // Guard against overwriting protected files (same check as edit_own_file)
         const { isProtectedFile } = await import("../self-mod/code.js");
@@ -3314,6 +3315,12 @@ export async function executeTool(
       durationMs: 0,
       error: `Unknown tool: ${toolName}`,
     };
+  }
+
+  // Standalone allocations are not crypto funds. Paid connectors are opt-in future work.
+  if (context.config.standalone && UNAVAILABLE_STANDALONE_TOOLS.has(toolName)) {
+    return { id: ulid(), name: toolName, arguments: args, result: "", durationMs: 0,
+      error: "Standalone zero-spend profile: this external resource/payment tool is disabled" };
   }
 
   // Policy evaluation (if engine is provided)

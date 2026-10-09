@@ -1,3 +1,4 @@
+import { getAutomatonDir } from "../identity/wallet.js";
 /**
  * Soul Tools — Tool implementations for soul management.
  *
@@ -38,7 +39,7 @@ export async function updateSoul(
 ): Promise<UpdateSoulResult> {
   try {
     const home = process.env.HOME || "/root";
-    const resolvedPath = soulPath || path.join(home, ".automaton", "SOUL.md");
+    const resolvedPath = soulPath || path.join(getAutomatonDir(), "SOUL.md");
 
     // Load current soul or create default
     let current = loadCurrentSoul(db, resolvedPath);

@@ -41,10 +41,10 @@ function createSolanaStubAccount(solanaAddress: string): PrivateKeyAccount {
   } as unknown as PrivateKeyAccount;
 }
 
-const AUTOMATON_DIR = path.join(
+const AUTOMATON_DIR = path.resolve(process.env.AUTOMATON_DIR || path.join(
   process.env.HOME || "/root",
   ".automaton",
-);
+));
 const WALLET_FILE = path.join(AUTOMATON_DIR, "wallet.json");
 
 export function getAutomatonDir(): string {

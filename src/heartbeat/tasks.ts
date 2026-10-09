@@ -146,6 +146,7 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
   },
 
   check_usdc_balance: async (ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
+    if (taskCtx.config.standalone) return { shouldWake: false };
     // Use ctx.usdcBalance instead of calling getUsdcBalance()
     const balance = ctx.usdcBalance;
     const credits = ctx.creditBalance;

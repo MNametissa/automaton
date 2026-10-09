@@ -6,6 +6,9 @@
  */
 
 import path from "node:path";
+import { getAutomatonDir } from "../identity/wallet.js";
+import { createStandaloneRegistry, configureStandaloneModels } from "../standalone/runtime.js";
+import { auditStartup, createSelfAuditTool, standaloneTools } from "../standalone/audit.js";
 import type {
   AutomatonIdentity,
   AutomatonConfig,
@@ -98,7 +101,7 @@ export async function runAgentLoop(
 
   const builtinTools = createBuiltinTools(identity.sandboxId);
   const installedTools = loadInstalledTools(db);
-  const tools = [...builtinTools, ...installedTools];
+  let tools = [...builtinTools, ...installedTools];
   const toolContext: ToolContext = {
     identity,
     config,
@@ -108,16 +111,31 @@ export async function runAgentLoop(
     social,
   };
 
+  if (config.standalone) {
+    tools = standaloneTools(tools, toolContext);
+    tools.push(createSelfAuditTool(() => tools));
+    const audit = await auditStartup(toolContext, tools);
+    if (audit.status === 'blocked') {
+      db.setKV('sleep_reason', audit.blockers.join('; '));
+      db.setKV('sleep_until', new Date(Date.now() + 60_000).toISOString());
+      db.setAgentState('sleeping');
+      onStateChange?.('sleeping');
+      return;
+    }
+  }
+
   // Initialize inference router (Phase 2.3)
   const modelStrategyConfig: ModelStrategyConfig = {
     ...DEFAULT_MODEL_STRATEGY_CONFIG,
     ...(config.modelStrategy ?? {}),
+    ...(config.standalone ? { inferenceModel: config.inferenceModel, lowComputeModel: config.inferenceModel, criticalModel: config.inferenceModel } : {}),
   };
   const modelRegistry = new ModelRegistry(db.raw);
   modelRegistry.initialize();
+  if (config.standalone) configureStandaloneModels(modelRegistry, config);
 
   // Discover Ollama models if configured
-  if (ollamaBaseUrl) {
+  if (ollamaBaseUrl && !config.standalone) {
     const { discoverOllamaModels } = await import("../ollama/discover.js");
     await discoverOllamaModels(ollamaBaseUrl, db.raw);
   }
@@ -133,6 +151,10 @@ export async function runAgentLoop(
     try {
       planModeController = new PlanModeController(db.raw);
 
+      let registry: ProviderRegistry;
+      if (config.standalone) {
+        registry = createStandaloneRegistry(config);
+      } else {
       // Bridge automaton config API keys to env vars for the provider registry.
       // The registry reads keys from process.env; the automaton config may have
       // them from config.json or Conway provisioning.
@@ -157,16 +179,17 @@ export async function runAgentLoop(
       }
 
       const providersPath = path.join(
-        process.env.HOME || process.cwd(),
-        ".automaton",
+        getAutomatonDir(),
         "inference-providers.json",
       );
-      const registry = ProviderRegistry.fromConfig(providersPath);
+      registry = ProviderRegistry.fromConfig(providersPath);
 
       // If OPENAI_BASE_URL was set (Conway fallback), update the default
       // provider's baseUrl so the OpenAI client points to Conway Compute.
       if (process.env.OPENAI_BASE_URL) {
         registry.overrideBaseUrl("openai", process.env.OPENAI_BASE_URL);
+      }
+
       }
 
       const unifiedInference = new UnifiedInferenceClient(registry);
@@ -192,7 +215,7 @@ export async function runAgentLoop(
         harnessRegistry,
         identity,
         config,
-        allowedEditRoot: process.cwd(),
+        allowedEditRoot: process.env.AUTOMATON_WORKSPACE || process.cwd(),
         tools,
         toolContext,
         policyEngine,
@@ -221,6 +244,7 @@ export async function runAgentLoop(
         config: {
           ...config,
           spawnAgent: async (task: any) => {
+            if (config.standalone) return initializedWorkerPool.spawn(task);
             // Try Conway sandbox spawn first (production)
             try {
               const { generateGenesisConfig } = await import("../replication/genesis.js");
@@ -358,7 +382,7 @@ export async function runAgentLoop(
   onStateChange?.("waking");
 
   // Get financial state
-  let financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm");
+  let financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm", config.standalone);
 
   // Check if this is the first run
   const isFirstRun = db.getTurnCount() === 0;
@@ -426,7 +450,7 @@ export async function runAgentLoop(
       }
 
       // Refresh financial state periodically
-      financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm");
+      financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm", config.standalone);
 
       // Check survival tier
       // api_unreachable: creditsCents === -1 means API failed with no cache.
@@ -441,7 +465,7 @@ export async function runAgentLoop(
         // available, buy credits NOW — before attempting inference.
         // This prevents the agent from dying mid-loop while waiting for
         // the heartbeat to fire. Uses a 60s cooldown to avoid hammering.
-        if ((tier === "critical" || tier === "low_compute") && financial.usdcBalance >= 5) {
+        if (!config.standalone && (tier === "critical" || tier === "low_compute") && financial.usdcBalance >= 5) {
           const INLINE_TOPUP_COOLDOWN_MS = 60_000;
           const lastInlineTopup = db.getKV("last_inline_topup_attempt");
           const cooldownExpired = !lastInlineTopup ||
@@ -461,7 +485,7 @@ export async function runAgentLoop(
                 log(config, `[AUTO-TOPUP] Bought $${topupResult.amountUsd} credits from USDC mid-loop`);
                 // Re-fetch financial state after topup so the rest of
                 // the turn sees the updated balance.
-                financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm");
+                financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm", config.standalone);
               }
             } catch (err: any) {
               logger.warn(`Inline auto-topup failed: ${err.message}`);
@@ -948,9 +972,10 @@ async function getFinancialState(
   address: string,
   db?: AutomatonDatabase,
   chainType?: string,
+  standalone = false,
 ): Promise<FinancialState> {
   let creditsCents = _lastKnownCredits;
-  let usdcBalance = _lastKnownUsdc;
+  let usdcBalance = standalone ? 0 : _lastKnownUsdc;
 
   try {
     creditsCents = await conway.getCreditsBalance();
@@ -966,7 +991,7 @@ async function getFinancialState(
           logger.warn("Balance API failed, using cached balance");
           return {
             creditsCents: parsed.creditsCents ?? 0,
-            usdcBalance: parsed.usdcBalance ?? 0,
+            usdcBalance: standalone ? 0 : parsed.usdcBalance ?? 0,
             lastChecked: new Date().toISOString(),
           };
         } catch (parseError) {
@@ -985,7 +1010,7 @@ async function getFinancialState(
 
   try {
     const network = chainType === "solana" ? "solana:mainnet" : "eip155:8453";
-    usdcBalance = await getUsdcBalance(address, network, chainType as any);
+    if (!standalone) usdcBalance = await getUsdcBalance(address, network, chainType as any);
     if (usdcBalance > 0) _lastKnownUsdc = usdcBalance;
   } catch (error) {
     logger.error("USDC balance fetch failed", error instanceof Error ? error : undefined);

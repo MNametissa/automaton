@@ -195,7 +195,8 @@ export class Orchestrator {
   async matchTaskToAgent(task: TaskNode): Promise<AgentAssignment> {
     const requestedRole = task.agentRole?.trim() || "generalist";
 
-    const idleAgents = this.params.agentTracker.getIdle();
+    // Local workers execute one task and exit; assigning another task requires spawn.
+    const idleAgents = this.params.agentTracker.getIdle().filter(agent => !agent.address.startsWith('local://'));
     const directRoleMatch = idleAgents.find((agent) => agent.role === requestedRole);
     if (directRoleMatch) {
       return {
@@ -206,7 +207,7 @@ export class Orchestrator {
     }
 
     const bestIdle = this.params.agentTracker.getBestForTask(requestedRole);
-    if (bestIdle) {
+    if (bestIdle && !bestIdle.address.startsWith('local://')) {
       return {
         agentAddress: bestIdle.address,
         agentName: bestIdle.name,
@@ -855,7 +856,7 @@ export class Orchestrator {
        ORDER BY created_at ASC`,
     ).all() as { name: string; address: string; status: string }[];
 
-    const candidate = rows.find((row) => !idleAddresses.has(row.address));
+    const candidate = rows.find((row) => !row.address.startsWith('local://') && !idleAddresses.has(row.address));
     if (!candidate) {
       return null;
     }

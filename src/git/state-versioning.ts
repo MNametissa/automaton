@@ -9,15 +9,8 @@
 import type { ConwayClient, AutomatonDatabase } from "../types.js";
 import { gitInit, gitCommit, gitStatus, gitLog } from "./tools.js";
 
-const AUTOMATON_DIR = "~/.automaton";
-
-function resolveHome(p: string): string {
-  const home = process.env.HOME || "/root";
-  if (p.startsWith("~")) {
-    return `${home}${p.slice(1)}`;
-  }
-  return p;
-}
+import { getAutomatonDir } from "../identity/wallet.js";
+const quote = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'";
 
 /**
  * Initialize git repo for the automaton's state directory.
@@ -26,11 +19,11 @@ function resolveHome(p: string): string {
 export async function initStateRepo(
   conway: ConwayClient,
 ): Promise<void> {
-  const dir = resolveHome(AUTOMATON_DIR);
+  const dir = getAutomatonDir();
 
   // Check if already initialized
   const checkResult = await conway.exec(
-    `test -d ${dir}/.git && echo "exists" || echo "nope"`,
+    `test -d ${quote(`${dir}/.git`)} && echo "exists" || echo "nope"`,
     5000,
   );
 
@@ -44,6 +37,7 @@ export async function initStateRepo(
   // Create .gitignore for sensitive files
   const gitignore = `# Sensitive files - never commit
 wallet.json
+automaton.json
 config.json
 state.db
 state.db-wal
@@ -57,7 +51,7 @@ logs/
 
   // Configure git user
   await conway.exec(
-    `cd ${dir} && git config user.name "Automaton" && git config user.email "automaton@conway.tech"`,
+    `cd ${quote(dir)} && git config user.name "Automaton" && git config user.email "automaton@conway.tech"`,
     5000,
   );
 
@@ -74,7 +68,7 @@ export async function commitStateChange(
   description: string,
   category: string = "state",
 ): Promise<string> {
-  const dir = resolveHome(AUTOMATON_DIR);
+  const dir = getAutomatonDir();
 
   // Check if there are changes
   const status = await gitStatus(conway, dir);
@@ -139,6 +133,6 @@ export async function getStateHistory(
   conway: ConwayClient,
   limit: number = 20,
 ) {
-  const dir = resolveHome(AUTOMATON_DIR);
+  const dir = getAutomatonDir();
   return gitLog(conway, dir, limit);
 }

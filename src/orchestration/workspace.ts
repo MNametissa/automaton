@@ -42,7 +42,7 @@ export class AgentWorkspace implements AgentWorkspace {
 
     this.goalId = normalizedGoalId;
     this.basePath = path.resolve(
-      basePath ?? path.join(os.homedir(), ".automaton", "workspace", normalizedGoalId),
+      basePath ?? path.join(process.env.AUTOMATON_WORKSPACE || process.env.AUTOMATON_DIR || path.join(os.homedir(), ".automaton"), "workspace", normalizedGoalId),
     );
 
     this.outputsPath = path.join(this.basePath, "outputs");

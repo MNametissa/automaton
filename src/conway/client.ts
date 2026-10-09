@@ -40,7 +40,7 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
   // Normalize sandbox ID defensively so values like whitespace/"undefined"/"null"
   // never produce malformed API paths such as /v1/sandboxes//exec.
   const sandboxId = normalizeSandboxId(options.sandboxId);
-  const httpClient = new ResilientHttpClient();
+  const httpClient = new ResilientHttpClient({ allowHttpOnLoopback: true });
 
   async function request(
     method: string,
@@ -114,7 +114,7 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
         timeout: timeout || 30_000,
         encoding: "utf-8",
         maxBuffer: 10 * 1024 * 1024,
-        cwd: process.env.HOME || "/root",
+        cwd: process.env.AUTOMATON_WORKSPACE || process.cwd(),
       });
       return { stdout: stdout || "", stderr: "", exitCode: 0 };
     } catch (err: any) {
@@ -166,7 +166,7 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
   const resolveLocalPath = (filePath: string): string =>
     filePath.startsWith("~")
       ? nodePath.join(process.env.HOME || "/root", filePath.slice(1))
-      : filePath;
+      : nodePath.resolve(process.env.AUTOMATON_WORKSPACE || process.cwd(), filePath);
 
   const writeFile = async (
     filePath: string,
@@ -540,10 +540,9 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
 
   const listModels = async (): Promise<ModelInfo[]> => {
     // Try inference.conway.tech first (has availability info), fall back to control plane
-    const urls = [
-      "https://inference.conway.tech/v1/models",
-      `${apiUrl}/v1/models`,
-    ];
+    const urls = new URL(apiUrl).origin === "https://api.conway.tech"
+      ? ["https://inference.conway.tech/v1/models", `${apiUrl}/v1/models`]
+      : [`${apiUrl}/v1/models`];
     for (const url of urls) {
       try {
         const resp = await httpClient.request(url, {
